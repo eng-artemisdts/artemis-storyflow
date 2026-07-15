@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  // Em produção, troque por "postgresql" e ajuste DATABASE_URL no .env.
+  // Os campos String longos abaixo viram TEXT nativamente no SQLite;
+  // no Postgres, adicione @db.Text onde fizer sentido.
+  provider = "sqlite"
+}
+
+/// Canal YouTube / faceless — configura o CHANNEL CONFIG do master-prompt-narrativo.
+/// Um canal agrupa vários projetos (vídeos).
+model Channel {
+  id                 String   @id @default(cuid())
+  name               String
+  niche              String
+  description        String   @default("")
+  /// Formato padrão dos vídeos do canal; projetos herdam na criação.
+  videoAspectRatio   String   @default("9:16") // "16:9" | "9:16"
+  /// Duração média dos vídeos (min). WORD_/SCENES_ são derivados disso.
+  targetDurationMin  Int      @default(10)
+  outputLanguage     String
+  addressForm        String
+  forbiddenForms     String
+  /// Calculados a partir de targetDurationMin (armazenados para preview/audit).
+  wordMin            Int      @default(1410)
+  wordTarget         Int      @default(1500)
+  wordMax            Int      @default(1605)
+  scenesMin          Int      @default(3)
+  scenesMax          Int      @default(6)
+  sceneWords         String   @default("250–380")
+  suspensePhrase     String   @default("")
+  concreteUnits      String   @default("")
+  brandSignoff       String   @default("none")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  projects Project[]
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  name          String
+  channelId     String?
+  script        String?
+  /// Tópico do vídeo usado para gerar o roteiro via master prompt narrativo.
+  videoTopic    String?
+  /// Snapshot do master prompt já preenchido com CHANNEL CONFIG + VIDEO_TOPIC.
+  narrativePrompt String?
+  imageProvider String?
+  imageModel    String?
+  videoProvider String?
+  videoModel    String?
+  llmProvider   String?
+  llmModel      String?
+  styleId            String? // preset de estilo visual (src/lib/style-presets.ts)
+  targetDurationMin  Int? // duração alvo do vídeo em minutos
+  videoAspectRatio   String  @default("16:9") // "16:9" | "9:16"
+  /// Tipo de produção: motion (pipeline atual) | static (slideshow — etapas futuras).
+  videoKind          String  @default("motion") // "motion" | "static"
+  /// URL pública do áudio de narração (MP3), ex.: /uploads/...
+  audioUrl           String?
+  /// Origem: "tts" (gerado com IA) | "upload" (MP3 enviado).
+  audioSource        String?
+  /// Transcrição alinhada (JSON): texto + segmentos/palavras com timestamps.
+  transcriptionJson  String?
+  /// Lista de b-rolls / cenas static (JSON): prompts + start/end.
+  brollsJson         String?
+  createdAt          DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  channel     Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  characters  Character[]
+  scenarios   Scenario[]
+  scenes      Scene[]
+  jobs        GenerationJob[]
+  whiteboard  Whiteboard?
+
+  @@index([channelId])
+}
+
+model Character {
+  id           String  @id @default(cuid())
+  projectId    String
+  name         String
+  description  String
+  visualPrompt String
+  imageUrl     String?
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Scenario {
+  id           String  @id @default(cuid())
+  projectId    String
+  name         String
+  description  String
+  visualPrompt String
+  imageUrl     String?
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Scene {
+  id           String  @id @default(cuid())
+  projectId    String
+  order        Int
+  title        String
+  summary      String
+  videoPrompt  String
+  dialogue     String?
+  durationSec  Int     @default(8)
+  keyframeUrl  String?
+  videoUrl     String?
+  characterIds String  @default("[]") // JSON array de ids de Character
+  scenarioId   String?
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model GenerationJob {
+  id         String   @id @default(cuid())
+  projectId  String
+  kind       String // 'image' | 'video'
+  provider   String
+  model      String
+  externalId String?
+  targetType String // 'character' | 'scenario' | 'scene_keyframe' | 'scene_video' | 'broll'
+  targetId   String
+  // Prompt específico do job (ex.: instrução de edição). Null = usa o prompt da cena.
+  prompt     String?
+  status     String   @default("queued") // queued | running | succeeded | failed
+  error      String?
+  resultUrl  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model Whiteboard {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  nodes     String // JSON dos nós do React Flow
+  edges     String // JSON das conexões
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
