@@ -28,9 +28,11 @@ function createLanguageModel(
   }
 }
 
+import { extractScriptMarkdown } from "@/lib/narrative/extract-script-markdown";
+
 /**
  * Gera o roteiro narrativo long-form a partir do master prompt já preenchido.
- * Retorna apenas o texto do roteiro (sem meta-comentário).
+ * Retorna o conteúdo do arquivo .md (frontmatter + cenas).
  */
 export async function generateNarrativeScriptText(input: {
   providerId: string;
@@ -52,5 +54,5 @@ export async function generateNarrativeScriptText(input: {
     maxOutputTokens: 16_384,
   });
 
-  return text.trim();
+  return extractScriptMarkdown(text);
 }

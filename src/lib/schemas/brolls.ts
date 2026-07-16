@@ -40,3 +40,14 @@ export type ProjectBrolls = {
   /** Prompt completo (system + user) usado na análise LLM, exportável em .md. */
   generationPromptMd?: string | null;
 };
+
+export function parseProjectBrolls(raw: string | null | undefined): ProjectBrolls | null {
+  if (!raw?.trim()) return null;
+  try {
+    const data = JSON.parse(raw) as ProjectBrolls;
+    if (!data || !Array.isArray(data.brolls)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}

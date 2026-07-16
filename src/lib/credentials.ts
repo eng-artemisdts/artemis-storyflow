@@ -41,6 +41,9 @@ const ENV_FALLBACKS: Record<string, string | undefined> = {
   get xai() {
     return process.env.XAI_API_KEY;
   },
+  get audioshake() {
+    return process.env.AUDIOSHAKE_API_KEY;
+  },
 };
 
 /**

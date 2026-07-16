@@ -6,10 +6,16 @@ export const dynamic = "force-dynamic";
 
 export default async function StylePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const project = await prisma.project.findUnique({
-    where: { id },
-    select: { id: true, styleId: true },
-  });
+  const [project, customStyles] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id },
+      select: { id: true, styleId: true },
+    }),
+    prisma.customStyle.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, title: true, prompt: true, previewImageUrl: true },
+    }),
+  ]);
   if (!project) notFound();
 
   return (
@@ -23,7 +29,11 @@ export default async function StylePage({ params }: { params: Promise<{ id: stri
           as cenas.
         </p>
       </div>
-      <StylePicker projectId={project.id} currentStyleId={project.styleId} />
+      <StylePicker
+        projectId={project.id}
+        currentStyleId={project.styleId}
+        initialCustomStyles={customStyles}
+      />
     </div>
   );
 }

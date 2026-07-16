@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { parseAiContextFromRequest } from "@/lib/ai-request-context";
+import { runWithAiContext } from "@/lib/credentials";
 import {
   downloadAndNormalizeTranscript,
   getAudioshakeApiKey,
 } from "@/lib/providers/audioshake";
+import { parseProjectTranscription } from "@/lib/transcription";
 
 export const runtime = "nodejs";
 
 /**
- * Consulta status da task AudioShake. Quando completa, persiste a transcrição no projeto.
+ * Consulta status da task. AudioShake: polling externo.
+ * OpenAI: transcrição já persistida no POST — lê do banco se taskId começa com openai:.
  */
 export async function GET(
   request: Request,
@@ -21,51 +25,70 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "taskId é obrigatório" }, { status: 400 });
   }
 
+  const ai = parseAiContextFromRequest(request);
+
   try {
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, videoKind: true },
-    });
-    if (!project) {
-      return NextResponse.json({ ok: false, error: "Projeto não encontrado" }, { status: 404 });
-    }
-    if (project.videoKind !== "static") {
-      return NextResponse.json(
-        { ok: false, error: "Transcrição disponível apenas para vídeos static" },
-        { status: 400 }
-      );
-    }
+    return await runWithAiContext(ai, async () => {
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true, videoKind: true, transcriptionJson: true },
+      });
+      if (!project) {
+        return NextResponse.json({ ok: false, error: "Projeto não encontrado" }, { status: 404 });
+      }
+      if (project.videoKind !== "static") {
+        return NextResponse.json(
+          { ok: false, error: "Transcrição disponível apenas para vídeos static" },
+          { status: 400 }
+        );
+      }
 
-    const apiKey = getAudioshakeApiKey();
-    const result = await downloadAndNormalizeTranscript(apiKey, taskId);
+      // OpenAI: resultado já salvo no POST
+      if (taskId.startsWith("openai:")) {
+        const transcription = parseProjectTranscription(project.transcriptionJson);
+        if (transcription?.taskId === taskId) {
+          return NextResponse.json({
+            ok: true,
+            data: { status: "completed" as const, transcription },
+          });
+        }
+        return NextResponse.json(
+          { ok: false, error: "Transcrição OpenAI não encontrada no projeto" },
+          { status: 404 }
+        );
+      }
 
-    if (result.status === "processing") {
-      return NextResponse.json({ ok: true, data: { status: "processing" as const } });
-    }
-    if (result.status === "error" || !result.transcription) {
-      return NextResponse.json(
-        { ok: false, error: result.error ?? "Falha na transcrição" },
-        { status: 500 }
-      );
-    }
+      const apiKey = getAudioshakeApiKey();
+      const result = await downloadAndNormalizeTranscript(apiKey, taskId);
 
-    const transcription = {
-      ...result.transcription,
-      createdAt: new Date().toISOString(),
-    };
+      if (result.status === "processing") {
+        return NextResponse.json({ ok: true, data: { status: "processing" as const } });
+      }
+      if (result.status === "error" || !result.transcription) {
+        return NextResponse.json(
+          { ok: false, error: result.error ?? "Falha na transcrição" },
+          { status: 500 }
+        );
+      }
 
-    await prisma.project.update({
-      where: { id: project.id },
-      data: {
-        transcriptionJson: JSON.stringify(transcription),
-        brollsJson: null,
-      },
-    });
-    revalidatePath(`/projects/${project.id}`, "layout");
+      const transcription = {
+        ...result.transcription,
+        createdAt: new Date().toISOString(),
+      };
 
-    return NextResponse.json({
-      ok: true,
-      data: { status: "completed" as const, transcription },
+      await prisma.project.update({
+        where: { id: project.id },
+        data: {
+          transcriptionJson: JSON.stringify(transcription),
+          brollsJson: null,
+        },
+      });
+      revalidatePath(`/projects/${project.id}`, "layout");
+
+      return NextResponse.json({
+        ok: true,
+        data: { status: "completed" as const, transcription },
+      });
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

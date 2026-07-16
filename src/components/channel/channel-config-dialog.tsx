@@ -2,27 +2,22 @@
 
 import { useState, type ComponentType } from "react";
 import {
-  Ban,
   BookOpen,
   Check,
   CircleHelp,
-  Clapperboard,
   Copy,
   Globe2,
-  Hash,
-  Layers,
   MessageCircle,
   Mic2,
   Quote,
-  Ruler,
-  Sparkles,
   Target,
-  Timer,
-  Type,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { ChannelNarrativeConfig } from "@/lib/narrative/channel-config";
 import { formatChannelConfigBlock } from "@/lib/narrative/channel-config";
+import { narrationTypeLabel } from "@/lib/narrative/narration-types";
+import { channelTypeLabel } from "@/lib/narrative/channel-types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -70,14 +65,6 @@ function buildGroups(config: ChannelNarrativeConfig): ConfigGroup[] {
           icon: BookOpen,
         },
         {
-          key: "CONCRETE_UNITS",
-          label: "Detalhes concretos",
-          value: config.concreteUnits,
-          tooltip:
-            "Unidades e objetos específicos do nicho (datas, números, texturas). Tornam a narração tangível.",
-          icon: Ruler,
-        },
-        {
           key: "BRAND_SIGNOFF",
           label: "Assinatura",
           value: config.brandSignoff,
@@ -88,9 +75,35 @@ function buildGroups(config: ChannelNarrativeConfig): ConfigGroup[] {
       ],
     },
     {
-      title: "Idioma e tratamento",
-      description: "Como o espectador é tratado na narração.",
+      title: "Formato do canal",
+      description: "Tipo de roteiro e estrutura do master prompt.",
       fields: [
+        {
+          key: "CHANNEL_TYPE",
+          label: "Tipo de canal",
+          value: channelTypeLabel(config.channelType),
+          tooltip:
+            "Formato editorial — história narrativa, documentário, lista, explicador, etc.",
+          icon: Mic2,
+        },
+        {
+          key: "REFERENCE_CHARACTER",
+          label: "Personagem de referência",
+          value: config.hasReferenceCharacter
+            ? `${config.referenceCharacterName}${config.referenceCharacterDescription ? ` — ${config.referenceCharacterDescription}` : ""}`
+            : "none",
+          tooltip:
+            "Personagem visual recorrente. Quando definido, o flow anexa storyboard na geração de imagens.",
+          icon: UserRound,
+        },
+        {
+          key: "NARRATION_TYPE",
+          label: "Tipo de narração",
+          value: narrationTypeLabel(config.narrationType),
+          tooltip:
+            "Ponto de vista do roteiro — segunda pessoa (você), primeira pessoa (eu) ou terceira pessoa.",
+          icon: Mic2,
+        },
         {
           key: "OUTPUT_LANGUAGE",
           label: "Idioma",
@@ -106,14 +119,6 @@ function buildGroups(config: ChannelNarrativeConfig): ConfigGroup[] {
             "Forma de se dirigir ao espectador (você, tú, you). Mantém o tom informal e consistente.",
           icon: MessageCircle,
         },
-        {
-          key: "FORBIDDEN_FORMS",
-          label: "Formas proibidas",
-          value: config.forbiddenForms,
-          tooltip:
-            "Registro que o roteiro deve evitar — por exemplo português europeu ou tratamento formal.",
-          icon: Ban,
-        },
       ],
     },
     {
@@ -121,60 +126,12 @@ function buildGroups(config: ChannelNarrativeConfig): ConfigGroup[] {
       description: "Calculado a partir da duração média do canal.",
       fields: [
         {
-          key: "WORD_MIN",
-          label: "Palavras (mín.)",
-          value: String(config.wordMin),
-          tooltip: "Limite inferior de palavras. Abaixo disso o roteiro é considerado curto demais.",
-          icon: Hash,
-        },
-        {
           key: "WORD_TARGET",
           label: "Palavras (alvo)",
           value: String(config.wordTarget),
-          tooltip: "Meta ideal de palavras — bate com a duração média escolhida para os vídeos.",
-          icon: Target,
-        },
-        {
-          key: "WORD_MAX",
-          label: "Palavras (máx.)",
-          value: String(config.wordMax),
-          tooltip: "Teto de palavras. Acima disso o roteiro precisa ser cortado.",
-          icon: Timer,
-        },
-        {
-          key: "SCENES_MIN",
-          label: "Cenas (mín.)",
-          value: String(config.scenesMin),
-          tooltip: "Número mínimo de cenas/movimentos narrativos no roteiro.",
-          icon: Layers,
-        },
-        {
-          key: "SCENES_MAX",
-          label: "Cenas (máx.)",
-          value: String(config.scenesMax),
-          tooltip: "Número máximo de cenas/movimentos narrativos no roteiro.",
-          icon: Clapperboard,
-        },
-        {
-          key: "SCENE_WORDS",
-          label: "Palavras por cena",
-          value: config.sceneWords,
-          tooltip: "Faixa sugerida de palavras por cena, para manter ritmo e comprimento estáveis.",
-          icon: Type,
-        },
-      ],
-    },
-    {
-      title: "Assinatura narrativa",
-      description: "Ganchos e voz repetidos ao longo dos vídeos.",
-      fields: [
-        {
-          key: "SUSPENSE_PHRASE",
-          label: "Frase de suspense",
-          value: config.suspensePhrase,
           tooltip:
-            "Gancho recorrente do canal (ex.: \"Você ainda não sabe, mas...\"). Semear 3–6 vezes no roteiro.",
-          icon: Sparkles,
+            "Meta de palavras no roteiro — bate com a duração média. A estrutura (cenas, perguntas, passos) adapta-se ao tópico.",
+          icon: Target,
         },
       ],
     },
@@ -269,7 +226,7 @@ export function ChannelConfigDialog({
               <p className="text-sm font-medium">Configuração do roteiro</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {durationMin} min · {videoAspectRatio} · ~{config.wordTarget.toLocaleString("pt-BR")}{" "}
-                palavras · {config.scenesMin}–{config.scenesMax} cenas
+                palavras
               </p>
             </div>
             <span className="shrink-0 text-xs font-medium text-primary">Ver detalhes</span>

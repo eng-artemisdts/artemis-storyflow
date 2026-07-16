@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { resolveApiKey, runWithAiContext } from "@/lib/credentials";
 import { resolveAiProviders } from "@/lib/channel-ai";
-import { getStylePreset } from "@/lib/style-presets";
+import { resolveStylePreset } from "@/lib/resolve-style-preset";
 import { parseProjectTranscription } from "@/lib/transcription";
 import {
   buildBrollsGenerationPromptParts,
@@ -12,11 +12,9 @@ import {
   generateBrollsFromTranscription,
   parseProjectBrolls,
 } from "@/lib/brolls/generate-brolls";
-import { submitImageJob } from "@/lib/jobs";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
 import type { AiClientContext } from "@/lib/ai-settings";
 import {
-  GenerateAllBrollImagesSchema,
   GenerateBrollsSchema,
   ProjectIdSchema,
   UpdateBrollPromptSchema,
@@ -62,7 +60,7 @@ export async function generateProjectBrolls(input: {
       }
 
       const apiKey = await resolveApiKey(projectId, providers.llmProvider);
-      const stylePreset = getStylePreset(project.styleId);
+      const stylePreset = await resolveStylePreset(project.styleId);
       const brolls = await generateBrollsFromTranscription({
         providerId: providers.llmProvider,
         apiKey,
@@ -120,7 +118,7 @@ export async function getBrollsGenerationPromptMd(input: {
       return fail("Gere a transcrição antes de exportar o prompt.");
     }
 
-    const stylePreset = getStylePreset(project.styleId);
+    const stylePreset = await resolveStylePreset(project.styleId);
     const { system, user } = buildBrollsGenerationPromptParts({
       transcription,
       stylePreset,
@@ -181,51 +179,6 @@ export async function updateBrollPrompt(input: {
     });
     revalidateScenes(projectId);
     return ok(undefined);
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-/** Gera imagens para todos os b-rolls ainda sem imageUrl. */
-export async function generateAllBrollImages(input: {
-  projectId: string;
-  ai?: AiClientContext;
-}): Promise<ActionResult<{ jobIds: string[] }>> {
-  const parsed = GenerateAllBrollImagesSchema.safeParse(input);
-  if (!parsed.success) return fail("Projeto inválido");
-  const { projectId, ai } = parsed.data;
-
-  try {
-    return await runWithAiContext(ai, async () => {
-      const project = await prisma.project.findUnique({
-        where: { id: projectId },
-        select: { brollsJson: true, videoKind: true },
-      });
-      if (!project || project.videoKind !== "static") {
-        return fail("Projeto static não encontrado");
-      }
-      const data = parseProjectBrolls(project.brollsJson);
-      if (!data?.brolls.length) return fail("Gere a lista de cenas antes");
-
-      const jobIds: string[] = [];
-      for (const broll of data.brolls) {
-        if (broll.imageUrl) continue;
-        const job = await submitImageJob(projectId, "broll", String(broll.id));
-        if (job.status !== "failed") jobIds.push(job.id);
-      }
-
-      if (jobIds.length === 0) {
-        const pending = data.brolls.filter((b) => !b.imageUrl).length;
-        if (pending > 0) {
-          return fail(
-            "Nenhum job pôde ser submetido — verifique a chave de API e o provedor."
-          );
-        }
-      }
-
-      revalidateScenes(projectId);
-      return ok({ jobIds });
-    });
   } catch (err) {
     return fail(err);
   }

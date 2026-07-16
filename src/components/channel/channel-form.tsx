@@ -9,14 +9,18 @@ import {
   Clock,
   Globe2,
   Languages,
+  LayoutGrid,
   Loader2,
+  Mic2,
   Sparkles,
   Tag,
   Type,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createChannel,
+  previewChannelMasterPrompt,
   suggestChannelField,
   updateChannel,
 } from "@/actions/channel.actions";
@@ -27,6 +31,16 @@ import {
   DEFAULT_VIDEO_ASPECT_RATIO,
   LANGUAGE_PRESETS,
 } from "@/lib/narrative/channel-config";
+import {
+  DEFAULT_CHANNEL_TYPE,
+  channelTypeLabel,
+  type ChannelTypeId,
+} from "@/lib/narrative/channel-types";
+import {
+  DEFAULT_NARRATION_TYPE,
+  narrationTypeLabel,
+  type NarrationTypeId,
+} from "@/lib/narrative/narration-types";
 import { deriveScriptLengthFromDuration } from "@/lib/narrative/script-length";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +54,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AspectRatioPicker } from "@/components/project/aspect-ratio-picker";
+import { ChannelTypePicker } from "@/components/channel/channel-type-picker";
 import { DurationMinutesPicker } from "@/components/channel/duration-minutes-picker";
+import { NarrationTypePicker } from "@/components/channel/narration-type-picker";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { VideoAspectRatio } from "@/lib/video-aspect";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +68,12 @@ export type ChannelFormValues = {
   videoAspectRatio: VideoAspectRatio;
   targetDurationMin: number;
   outputLanguage: string;
+  channelType: ChannelTypeId;
+  channelTypeDescription: string;
+  hasReferenceCharacter: boolean;
+  referenceCharacterName: string;
+  referenceCharacterDescription: string;
+  narrationType: NarrationTypeId;
   addressForm: string;
   forbiddenForms: string;
   suspensePhrase: string;
@@ -58,12 +81,14 @@ export type ChannelFormValues = {
   brandSignoff: string;
 };
 
-type WizardStep = 0 | 1 | 2;
+type WizardStep = 0 | 1 | 2 | 3 | 4;
 
 const STEPS = [
   { id: 0 as const, label: "Identidade", icon: Type },
-  { id: 1 as const, label: "Formato", icon: Clapperboard },
-  { id: 2 as const, label: "Revisar", icon: Check },
+  { id: 1 as const, label: "Formato", icon: LayoutGrid },
+  { id: 2 as const, label: "Narração", icon: Mic2 },
+  { id: 3 as const, label: "Vídeo", icon: Clapperboard },
+  { id: 4 as const, label: "Revisar", icon: Check },
 ];
 
 function emptyForm(initial?: Partial<ChannelFormValues>): ChannelFormValues {
@@ -78,6 +103,12 @@ function emptyForm(initial?: Partial<ChannelFormValues>): ChannelFormValues {
     videoAspectRatio: initial?.videoAspectRatio ?? DEFAULT_VIDEO_ASPECT_RATIO,
     targetDurationMin: initial?.targetDurationMin ?? DEFAULT_CHANNEL_DURATION_MIN,
     outputLanguage: initial?.outputLanguage ?? language.outputLanguage,
+    channelType: initial?.channelType ?? DEFAULT_CHANNEL_TYPE,
+    channelTypeDescription: initial?.channelTypeDescription ?? "",
+    hasReferenceCharacter: initial?.hasReferenceCharacter ?? false,
+    referenceCharacterName: initial?.referenceCharacterName ?? "",
+    referenceCharacterDescription: initial?.referenceCharacterDescription ?? "",
+    narrationType: initial?.narrationType ?? DEFAULT_NARRATION_TYPE,
     addressForm: initial?.addressForm ?? language.addressForm,
     forbiddenForms: initial?.forbiddenForms ?? language.forbiddenForms,
     suspensePhrase: initial?.suspensePhrase ?? "",
@@ -102,6 +133,8 @@ export function ChannelForm({
   const [generatingField, setGeneratingField] = useState<"niche" | "description" | null>(
     null
   );
+  const [masterPromptPreview, setMasterPromptPreview] = useState<string | null>(null);
+  const [isPreviewingPrompt, setIsPreviewingPrompt] = useState(false);
 
   const languageLabel = useMemo(
     () =>
@@ -146,6 +179,7 @@ export function ChannelForm({
           niche: form.niche,
           description: form.description,
           outputLanguage: form.outputLanguage,
+          channelType: form.channelType,
         });
         if (!result.ok) {
           toast.error(result.error);
@@ -157,6 +191,32 @@ export function ChannelForm({
         setGeneratingField(null);
       }
     })();
+  }
+
+  function buildPayload() {
+    return {
+      name: form.name,
+      niche: form.niche,
+      description: form.description,
+      videoAspectRatio: form.videoAspectRatio,
+      targetDurationMin: form.targetDurationMin,
+      outputLanguage: form.outputLanguage,
+      channelType: form.channelType,
+      channelTypeDescription: form.channelTypeDescription.trim(),
+      hasReferenceCharacter: form.hasReferenceCharacter,
+      referenceCharacterName: form.hasReferenceCharacter
+        ? form.referenceCharacterName.trim()
+        : "",
+      referenceCharacterDescription: form.hasReferenceCharacter
+        ? form.referenceCharacterDescription.trim()
+        : "",
+      narrationType: form.narrationType,
+      addressForm: form.addressForm,
+      forbiddenForms: form.forbiddenForms,
+      suspensePhrase: form.suspensePhrase.trim(),
+      concreteUnits: form.concreteUnits.trim(),
+      brandSignoff: form.brandSignoff.trim() || "none",
+    };
   }
 
   function validateStep(current: WizardStep): boolean {
@@ -174,16 +234,47 @@ export function ChannelForm({
         return false;
       }
     }
+    if (current === 1) {
+      if (form.channelType === "custom" && form.channelTypeDescription.trim().length < 10) {
+        toast.error("Descreva o formato personalizado (mín. 10 caracteres)");
+        return false;
+      }
+    }
+    if (current === 2) {
+      if (form.hasReferenceCharacter && !form.referenceCharacterName.trim()) {
+        toast.error("Informe o nome do personagem de referência");
+        return false;
+      }
+    }
     return true;
   }
 
   function goNext() {
     if (!validateStep(step)) return;
-    setStep((s) => Math.min(2, s + 1) as WizardStep);
+    setStep((s) => Math.min(4, s + 1) as WizardStep);
   }
 
   function goBack() {
     setStep((s) => Math.max(0, s - 1) as WizardStep);
+  }
+
+  async function handlePreviewMasterPrompt() {
+    if (!validateStep(0) || !validateStep(1)) return;
+    setIsPreviewingPrompt(true);
+    try {
+      const result = await previewChannelMasterPrompt({
+        ...buildPayload(),
+        ai: getAiClientContext(),
+      });
+      if (result.ok) {
+        setMasterPromptPreview(result.data.masterPromptTemplate);
+        toast.success("Master prompt gerado");
+      } else {
+        toast.error(result.error);
+      }
+    } finally {
+      setIsPreviewingPrompt(false);
+    }
   }
 
   function handleSubmit() {
@@ -191,21 +282,17 @@ export function ChannelForm({
       setStep(0);
       return;
     }
+    if (!validateStep(1)) {
+      setStep(1);
+      return;
+    }
+    if (!validateStep(2)) {
+      setStep(2);
+      return;
+    }
 
     startTransition(async () => {
-      const payload = {
-        name: form.name,
-        niche: form.niche,
-        description: form.description,
-        videoAspectRatio: form.videoAspectRatio,
-        targetDurationMin: form.targetDurationMin,
-        outputLanguage: form.outputLanguage,
-        addressForm: form.addressForm,
-        forbiddenForms: form.forbiddenForms,
-        suspensePhrase: form.suspensePhrase.trim(),
-        concreteUnits: form.concreteUnits.trim(),
-        brandSignoff: form.brandSignoff.trim() || "none",
-      };
+      const payload = { ...buildPayload(), ai: getAiClientContext() };
 
       if (mode === "create") {
         const result = await createChannel(payload);
@@ -218,13 +305,13 @@ export function ChannelForm({
         return;
       }
       const result = await updateChannel({ channelId, ...payload });
-      if (result.ok) toast.success("Canal atualizado");
+      if (result.ok) toast.success("Canal atualizado — master prompt regenerado");
       else toast.error(result.error);
     });
   }
 
   return (
-    <div className="mx-auto w-full max-w-xl">
+    <div className="mx-auto w-full max-w-3xl">
       {/* Step indicator */}
       <nav className="mb-8 flex items-center justify-center gap-2" aria-label="Etapas">
         {STEPS.map((s, index) => {
@@ -400,8 +487,150 @@ export function ChannelForm({
           </div>
         )}
 
-        {/* Step 2 — Formato */}
+        {/* Step 2 — Tipo de canal */}
         {step === 1 && (
+          <div className="flex flex-col gap-6 p-6 sm:p-8">
+            <header className="space-y-1">
+              <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <LayoutGrid className="size-5" />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight">Qual o formato do canal?</h2>
+              <p className="text-sm text-muted-foreground">
+                Escolha o tipo de roteiro. Cada formato usa um master prompt otimizado — no final,
+                a IA personaliza com base nas informações do canal.
+              </p>
+            </header>
+
+            <ChannelTypePicker
+              value={form.channelType}
+              onChange={(channelType) => {
+                setMasterPromptPreview(null);
+                setForm((f) => ({ ...f, channelType }));
+              }}
+            />
+
+            <div className="space-y-2">
+              <Label htmlFor="channel-type-desc">
+                Descreva o formato{" "}
+                <span className="font-normal text-muted-foreground">
+                  (opcional{form.channelType === "custom" ? ", obrigatório para personalizado" : ""})
+                </span>
+              </Label>
+              <Textarea
+                id="channel-type-desc"
+                rows={3}
+                placeholder={
+                  form.channelType === "custom"
+                    ? "Ex.: Canal de curiosidades científicas em formato pergunta-resposta, 5 min, tom humorístico…"
+                    : "Ex.: Foco em histórias de empresas que quase faliram, tom investigativo…"
+                }
+                value={form.channelTypeDescription}
+                onChange={(e) => {
+                  setMasterPromptPreview(null);
+                  setForm((f) => ({ ...f, channelTypeDescription: e.target.value }));
+                }}
+                className="resize-none"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 3 — Narração */}
+        {step === 2 && (
+          <div className="flex flex-col gap-6 p-6 sm:p-8">
+            <header className="space-y-1">
+              <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Mic2 className="size-5" />
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight">Como é a narração?</h2>
+              <p className="text-sm text-muted-foreground">
+                O tipo de narrativa define o ponto de vista do roteiro e altera o master prompt
+                gerado para o canal.
+              </p>
+            </header>
+
+            <NarrationTypePicker
+              value={form.narrationType}
+              onChange={(narrationType) => {
+                setMasterPromptPreview(null);
+                setForm((f) => ({ ...f, narrationType }));
+              }}
+            />
+
+            <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="has-reference-character"
+                  checked={form.hasReferenceCharacter}
+                  onCheckedChange={(checked) => {
+                    setMasterPromptPreview(null);
+                    setForm((f) => ({
+                      ...f,
+                      hasReferenceCharacter: checked === true,
+                      ...(checked !== true
+                        ? { referenceCharacterName: "", referenceCharacterDescription: "" }
+                        : {}),
+                    }));
+                  }}
+                />
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="has-reference-character"
+                    className="flex cursor-pointer items-center gap-2 text-sm font-medium"
+                  >
+                    <UserRound className="size-3.5 text-muted-foreground" />
+                    Este canal tem um personagem de referência?
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se sim, o master prompt instruirá o flow a anexar a imagem de storyboard do
+                    personagem na geração visual.
+                  </p>
+                </div>
+              </div>
+
+              {form.hasReferenceCharacter ? (
+                <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="reference-character-name">Nome do personagem</Label>
+                    <Input
+                      id="reference-character-name"
+                      placeholder="Ex.: Marcus, A narradora, O viajante"
+                      value={form.referenceCharacterName}
+                      onChange={(e) => {
+                        setMasterPromptPreview(null);
+                        setForm((f) => ({ ...f, referenceCharacterName: e.target.value }));
+                      }}
+                      className="h-11"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reference-character-desc">
+                      Aparência / papel{" "}
+                      <span className="font-normal text-muted-foreground">(opcional)</span>
+                    </Label>
+                    <Textarea
+                      id="reference-character-desc"
+                      rows={3}
+                      placeholder="Ex.: Homem de 40 anos, casaco escuro, expressão contida — protagonista silencioso das histórias do canal."
+                      value={form.referenceCharacterDescription}
+                      onChange={(e) => {
+                        setMasterPromptPreview(null);
+                        setForm((f) => ({
+                          ...f,
+                          referenceCharacterDescription: e.target.value,
+                        }));
+                      }}
+                      className="resize-none"
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {/* Step 4 — Formato vídeo */}
+        {step === 3 && (
           <div className="flex flex-col gap-6 p-6 sm:p-8">
             <header className="space-y-1">
               <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -445,8 +674,8 @@ export function ChannelForm({
           </div>
         )}
 
-        {/* Step 3 — Revisar */}
-        {step === 2 && (
+        {/* Step 5 — Revisar */}
+        {step === 4 && (
           <div className="flex flex-col gap-6 p-6 sm:p-8">
             <header className="space-y-1">
               <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -454,7 +683,8 @@ export function ChannelForm({
               </div>
               <h2 className="text-xl font-semibold tracking-tight">Tudo certo?</h2>
               <p className="text-sm text-muted-foreground">
-                Confira o resumo antes de {mode === "create" ? "criar" : "salvar"}.
+                Confira o resumo. Ao {mode === "create" ? "criar" : "salvar"}, a IA gera o master
+                prompt personalizado para este canal.
               </p>
             </header>
 
@@ -479,18 +709,74 @@ export function ChannelForm({
                 onEdit={() => setStep(0)}
               />
               <ReviewRow
-                icon={Clapperboard}
-                label="Formato"
-                value={form.videoAspectRatio}
+                icon={LayoutGrid}
+                label="Tipo de canal"
+                value={
+                  form.channelTypeDescription.trim()
+                    ? `${channelTypeLabel(form.channelType)} — ${form.channelTypeDescription.trim()}`
+                    : channelTypeLabel(form.channelType)
+                }
                 onEdit={() => setStep(1)}
+              />
+              <ReviewRow
+                icon={Mic2}
+                label="Narração"
+                value={narrationTypeLabel(form.narrationType)}
+                onEdit={() => setStep(2)}
+              />
+              <ReviewRow
+                icon={UserRound}
+                label="Personagem"
+                value={
+                  form.hasReferenceCharacter && form.referenceCharacterName.trim()
+                    ? `${form.referenceCharacterName.trim()}${form.referenceCharacterDescription.trim() ? ` — ${form.referenceCharacterDescription.trim()}` : ""} · storyboard anexado no flow`
+                    : "Sem personagem de referência"
+                }
+                onEdit={() => setStep(2)}
+              />
+              <ReviewRow
+                icon={Clapperboard}
+                label="Proporção"
+                value={form.videoAspectRatio}
+                onEdit={() => setStep(3)}
               />
               <ReviewRow
                 icon={Clock}
                 label="Duração média"
-                value={`${form.targetDurationMin} min · ~${lengthPreview.wordTarget.toLocaleString("pt-BR")} palavras · ${lengthPreview.scenesMin}–${lengthPreview.scenesMax} cenas`}
-                onEdit={() => setStep(1)}
+                value={`${form.targetDurationMin} min · ~${lengthPreview.wordTarget.toLocaleString("pt-BR")} palavras`}
+                onEdit={() => setStep(3)}
               />
             </dl>
+
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Master prompt</p>
+                  <p className="text-xs text-muted-foreground">
+                    Pré-visualize antes de salvar (usa o LLM das Configurações).
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handlePreviewMasterPrompt()}
+                  disabled={isPreviewingPrompt || isPending}
+                >
+                  {isPreviewingPrompt ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  {isPreviewingPrompt ? "Gerando…" : "Pré-visualizar"}
+                </Button>
+              </div>
+              {masterPromptPreview ? (
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border bg-background/60 p-3 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                  {masterPromptPreview}
+                </pre>
+              ) : null}
+            </div>
           </div>
         )}
 
@@ -505,7 +791,7 @@ export function ChannelForm({
             <span />
           )}
 
-          {step < 2 ? (
+          {step < 4 ? (
             <Button type="button" onClick={goNext}>
               Continuar
               <ArrowRight className="size-4" />
@@ -513,7 +799,11 @@ export function ChannelForm({
           ) : (
             <Button type="button" onClick={handleSubmit} disabled={isPending} size="lg">
               {isPending && <Loader2 className="size-4 animate-spin" />}
-              {mode === "create" ? "Criar canal" : "Salvar alterações"}
+              {isPending
+                ? "Gerando master prompt…"
+                : mode === "create"
+                  ? "Criar canal"
+                  : "Salvar alterações"}
             </Button>
           )}
         </div>

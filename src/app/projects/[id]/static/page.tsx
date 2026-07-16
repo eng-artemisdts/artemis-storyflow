@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { fillMasterPrompt } from "@/lib/narrative/fill-master-prompt";
 import { toNarrativeConfig } from "@/lib/narrative/channel-config";
+import type { ChannelTypeId } from "@/lib/narrative/channel-types";
 import { NarrativeScriptEditor } from "@/components/script/narrative-script-editor";
 
 export const dynamic = "force-dynamic";
@@ -19,21 +20,28 @@ export default async function StaticProjectPage({
   if (!project) notFound();
 
   const videoTopic = project.videoTopic?.trim() ?? "";
-  let masterPrompt = project.narrativePrompt?.trim() ?? "";
+  const durationMin = project.targetDurationMin ?? project.channel?.targetDurationMin;
 
-  // Projetos antigos / sem snapshot: gera a partir do tópico do cadastro.
-  if (!masterPrompt && videoTopic && project.channel) {
-    const durationMin = project.targetDurationMin ?? project.channel.targetDurationMin;
-    masterPrompt = fillMasterPrompt(toNarrativeConfig(project.channel, durationMin), videoTopic);
-    await prisma.project.update({
-      where: { id: project.id },
-      data: { narrativePrompt: masterPrompt },
-    });
+  // Sempre gera o master prompt a partir do template + config atual do canal.
+  let masterPrompt = "";
+  if (videoTopic && project.channel) {
+    masterPrompt = fillMasterPrompt(
+      toNarrativeConfig(project.channel, durationMin),
+      videoTopic,
+      {
+        channelType: project.channel.channelType as ChannelTypeId,
+        masterPromptTemplate: project.channel.masterPromptTemplate,
+      }
+    );
+    if (masterPrompt !== (project.narrativePrompt?.trim() ?? "")) {
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { narrativePrompt: masterPrompt },
+      });
+    }
+  } else {
+    masterPrompt = project.narrativePrompt?.trim() ?? "";
   }
-
-  const channelConfigSummary = project.channel
-    ? `${project.channel.niche} · ${project.channel.outputLanguage} · "${project.channel.suspensePhrase}"`
-    : null;
 
   return (
     <div className="mx-auto flex h-full max-w-4xl flex-col px-6 py-8">
@@ -41,7 +49,7 @@ export default async function StaticProjectPage({
         <h1 className="text-2xl font-semibold tracking-tight">Roteiro narrativo</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           O master prompt já vem preenchido com o tópico do cadastro. Copie e use fora do app, ou
-          gere o roteiro aqui.
+          importe um roteiro .md abaixo.
         </p>
       </div>
       <NarrativeScriptEditor
@@ -49,8 +57,6 @@ export default async function StaticProjectPage({
         initialScript={project.script ?? ""}
         videoTopic={videoTopic}
         masterPrompt={masterPrompt}
-        channelName={project.channel?.name ?? null}
-        channelConfigSummary={channelConfigSummary}
         wordTarget={project.channel?.wordTarget ?? null}
       />
     </div>

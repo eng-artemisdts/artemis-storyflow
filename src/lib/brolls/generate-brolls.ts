@@ -4,7 +4,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject, type LanguageModel } from "ai";
 import type { LlmProviderId } from "@/lib/providers/types";
-import { BrollsLlmSchema, type ProjectBroll, type ProjectBrolls } from "@/lib/schemas/brolls";
+import { brollTimesLookLikeMs } from "@/lib/brolls/normalize-times";
+import { BrollsLlmSchema, type ProjectBroll, type ProjectBrolls, parseProjectBrolls as parseProjectBrollsFromSchema } from "@/lib/schemas/brolls";
 import type { ProjectTranscription } from "@/lib/transcription";
 import { formatTimestamp } from "@/lib/transcription";
 import type { StylePreset } from "@/lib/style-presets";
@@ -241,7 +242,17 @@ export function enrichBrolls(
   }>,
   audioEndSec: number
 ): ProjectBroll[] {
-  const sorted = [...raw].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
+  // O LLM recebe words em ms e às vezes devolve timestamp_seconds em ms.
+  const maxTs = raw.reduce((m, r) => Math.max(m, r.timestamp_seconds), 0);
+  const scale = brollTimesLookLikeMs(maxTs, audioEndSec) ? 0.001 : 1;
+
+  const sorted = [...raw]
+    .map((item) => ({
+      ...item,
+      timestamp_seconds: Math.max(0, item.timestamp_seconds * scale),
+    }))
+    .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
+
   return sorted.map((item, index) => {
     const start = Math.max(0, item.timestamp_seconds);
     const nextStart = sorted[index + 1]?.timestamp_seconds;
@@ -265,12 +276,5 @@ export function enrichBrolls(
 }
 
 export function parseProjectBrolls(raw: string | null | undefined): ProjectBrolls | null {
-  if (!raw?.trim()) return null;
-  try {
-    const data = JSON.parse(raw) as ProjectBrolls;
-    if (!data || !Array.isArray(data.brolls)) return null;
-    return data;
-  } catch {
-    return null;
-  }
+  return parseProjectBrollsFromSchema(raw);
 }

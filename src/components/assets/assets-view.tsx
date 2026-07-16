@@ -22,6 +22,7 @@ import {
   generateAssetImage,
 } from "@/actions/asset.actions";
 import { useJobPolling } from "@/hooks/use-job-polling";
+import { useImageGenErrorAlert } from "@/hooks/use-image-gen-error-alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -51,6 +52,7 @@ export function AssetsView({
   const [isAnalyzing, startAnalyze] = useTransition();
   const [isGenerating, startGenerate] = useTransition();
   const [busyTargets, setBusyTargets] = useState<Set<string>>(new Set());
+  const { reportImageGenError, alertDialog } = useImageGenErrorAlert();
 
   const { jobs, track } = useJobPolling({
     onJobFinished: (job) => {
@@ -60,7 +62,7 @@ export function AssetsView({
         return next;
       });
       if (job.status === "succeeded") router.refresh();
-      else toast.error(`Falha na geração: ${job.error ?? "erro desconhecido"}`);
+      else reportImageGenError(job.error);
     },
   });
 
@@ -149,6 +151,7 @@ export function AssetsView({
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
+      {alertDialog}
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Análise & Assets</h1>

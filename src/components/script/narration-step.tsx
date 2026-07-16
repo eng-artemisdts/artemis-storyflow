@@ -7,18 +7,35 @@ import { toast } from "sonner";
 import {
   clearNarrationAudio,
 } from "@/actions/narration.actions";
+import { MinimaxNarrationPanel } from "@/components/script/minimax-narration-panel";
 import { AudioPlayer } from "@/components/audio-player";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+function isMp3File(file: File): boolean {
+  const mime = file.type.toLowerCase();
+  const name = file.name.toLowerCase();
+  return (
+    mime === "audio/mpeg" ||
+    mime === "audio/mp3" ||
+    mime === "audio/x-mpeg" ||
+    name.endsWith(".mp3")
+  );
+}
 
 export function NarrationStep({
   projectId,
+  script,
   initialAudioUrl,
+  initialAudioMissing = false,
   initialAudioSource,
   hasScript,
 }: {
   projectId: string;
+  script: string;
   initialAudioUrl: string | null;
+  initialAudioMissing?: boolean;
   initialAudioSource: string | null;
   hasScript: boolean;
 }) {
@@ -27,6 +44,7 @@ export function NarrationStep({
   const [audioSource, setAudioSource] = useState(initialAudioSource);
   const [isUploading, startUpload] = useTransition();
   const [isClearing, startClear] = useTransition();
+  const [dragOver, setDragOver] = useState(false);
 
   function handleGenerateAi() {
     toast.message("Em breve", {
@@ -36,6 +54,10 @@ export function NarrationStep({
 
   function handleFileChange(file: File | null) {
     if (!file) return;
+    if (!isMp3File(file)) {
+      toast.error("Envie um arquivo MP3 (.mp3)");
+      return;
+    }
 
     startUpload(async () => {
       const formData = new FormData();
@@ -49,9 +71,14 @@ export function NarrationStep({
           | { ok: true; data: { audioUrl: string } }
           | { ok: false; error: string };
         if (result.ok) {
+          const replaced = Boolean(audioUrl);
           setAudioUrl(result.data.audioUrl);
           setAudioSource("upload");
-          toast.success("Narração enviada");
+          toast.success(replaced ? "Narração atualizada" : "Narração enviada", {
+            description: replaced
+              ? "Transcrição e cenas foram mantidas. Regenere a transcrição se o áudio mudou."
+              : undefined,
+          });
         } else {
           toast.error(result.error);
         }
@@ -68,7 +95,9 @@ export function NarrationStep({
       if (result.ok) {
         setAudioUrl(null);
         setAudioSource(null);
-        toast.success("Narração removida");
+        toast.success("Narração removida", {
+          description: "Transcrição e cenas também foram apagadas.",
+        });
       } else {
         toast.error(result.error);
       }
@@ -79,6 +108,14 @@ export function NarrationStep({
 
   return (
     <div className="flex flex-col gap-6">
+      {initialAudioMissing ? (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          O MP3 registrado no projeto não foi encontrado em disco. Envie o arquivo
+          novamente abaixo.
+        </p>
+      ) : null}
+      <MinimaxNarrationPanel script={script} />
+
       <div className="grid gap-4 md:grid-cols-2">
         <section className="flex flex-col gap-4 rounded-xl border bg-card/40 p-5">
           <div className="flex items-start gap-3">
@@ -109,7 +146,27 @@ export function NarrationStep({
           )}
         </section>
 
-        <section className="flex flex-col gap-4 rounded-xl border bg-card/40 p-5">
+        <section
+          className={cn(
+            "flex flex-col gap-4 rounded-xl border bg-card/40 p-5 transition-colors",
+            dragOver && "border-primary bg-primary/5"
+          )}
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!busy) setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDragOver(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (busy) return;
+            handleFileChange(e.dataTransfer.files?.[0] ?? null);
+          }}
+        >
           <div className="flex items-start gap-3">
             <div className="mt-0.5 rounded-md bg-primary/10 p-2 text-primary">
               <Upload className="size-4" />
@@ -117,7 +174,7 @@ export function NarrationStep({
             <div className="min-w-0 flex-1 space-y-1">
               <h2 className="text-sm font-medium">Upload do MP3</h2>
               <p className="text-xs text-muted-foreground">
-                Envie a narração já gravada (arquivo .mp3, até 50 MB).
+                Arraste o arquivo aqui ou envie a narração já gravada (.mp3, até 50 MB).
               </p>
             </div>
           </div>
@@ -128,20 +185,28 @@ export function NarrationStep({
             className="hidden"
             onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
           />
-          <Button
+          <button
             type="button"
-            variant="outline"
-            className="mt-auto w-full sm:w-auto"
-            onClick={() => inputRef.current?.click()}
             disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className={cn(
+              "mt-auto flex w-full flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-6 text-center transition-colors sm:w-auto sm:min-w-[220px]",
+              dragOver
+                ? "border-primary bg-primary/10"
+                : "border-border/80 bg-muted/20 hover:border-primary/40 hover:bg-muted/40",
+              busy && "pointer-events-none opacity-60"
+            )}
           >
             {isUploading ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
             ) : (
-              <Upload className="size-4" />
+              <Upload className="size-6 text-muted-foreground" />
             )}
-            {isUploading ? "Enviando…" : audioUrl ? "Trocar MP3" : "Enviar MP3"}
-          </Button>
+            <span className="text-sm font-medium">
+              {isUploading ? "Enviando…" : dragOver ? "Solte o MP3" : audioUrl ? "Trocar MP3" : "Arraste ou clique para enviar"}
+            </span>
+            <span className="text-xs text-muted-foreground">MP3 · até 50 MB</span>
+          </button>
         </section>
       </div>
 

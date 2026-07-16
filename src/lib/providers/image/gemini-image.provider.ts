@@ -46,9 +46,92 @@ interface GeminiGenerateResponse {
       }>;
     };
     finishReason?: string;
+    safetyRatings?: Array<{
+      category?: string;
+      probability?: string;
+      blocked?: boolean;
+    }>;
   }>;
   error?: { message?: string; status?: string };
-  promptFeedback?: { blockReason?: string };
+  promptFeedback?: {
+    blockReason?: string;
+    blockReasonMessage?: string;
+    safetyRatings?: Array<{
+      category?: string;
+      probability?: string;
+      blocked?: boolean;
+    }>;
+  };
+}
+
+function summarizeSafetyRatings(
+  ratings:
+    | Array<{ category?: string; probability?: string; blocked?: boolean }>
+    | undefined
+): string | null {
+  if (!ratings?.length) return null;
+  const notable = ratings.filter(
+    (r) =>
+      r.blocked ||
+      r.probability === "HIGH" ||
+      r.probability === "MEDIUM" ||
+      r.probability === "HARM_PROBABILITY_HIGH" ||
+      r.probability === "HARM_PROBABILITY_MEDIUM"
+  );
+  const list = (notable.length ? notable : ratings).slice(0, 6);
+  return list
+    .map((r) => {
+      const cat = (r.category ?? "?").replace(/^HARM_CATEGORY_/, "");
+      const prob = (r.probability ?? "?").replace(/^HARM_PROBABILITY_/, "");
+      return `${cat}:${prob}${r.blocked ? " (blocked)" : ""}`;
+    })
+    .join("; ");
+}
+
+/** Monta mensagem amigável + resposta do Gemini quando não há imagem. */
+function formatGeminiNoImageError(json: GeminiGenerateResponse): string {
+  const candidate = json.candidates?.[0];
+  const finish = candidate?.finishReason;
+  const textHint = (candidate?.content?.parts ?? [])
+    .map((p) => p.text)
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+    .slice(0, 500);
+  const ratings =
+    summarizeSafetyRatings(candidate?.safetyRatings) ??
+    summarizeSafetyRatings(json.promptFeedback?.safetyRatings);
+
+  const isSafety =
+    finish === "IMAGE_SAFETY" ||
+    finish === "SAFETY" ||
+    finish === "IMAGE_PROHIBITED_CONTENT" ||
+    finish === "IMAGE_RECITATION" ||
+    Boolean(json.promptFeedback?.blockReason);
+
+  if (isSafety) {
+    const reason =
+      finish ??
+      json.promptFeedback?.blockReason ??
+      json.promptFeedback?.blockReasonMessage ??
+      "SAFETY";
+    const parts = [
+      `Bloqueio de segurança do Gemini (${reason}).`,
+      "A imagem foi filtrada pelas políticas de conteúdo do provedor.",
+    ];
+    if (textHint) parts.push(`Resposta do modelo: ${textHint}`);
+    if (json.promptFeedback?.blockReasonMessage) {
+      parts.push(`Detalhe: ${json.promptFeedback.blockReasonMessage}`);
+    }
+    if (ratings) parts.push(`Safety ratings: ${ratings}`);
+    parts.push("Edite o prompt e tente novamente.");
+    return parts.join(" ");
+  }
+
+  if (textHint) {
+    return `Gemini não retornou imagem${finish ? ` (${finish})` : ""}: ${textHint}`;
+  }
+  return `Gemini não retornou imagem${finish ? ` (${finish})` : ""}`;
 }
 
 interface ImagenPredictResponse {
@@ -162,23 +245,13 @@ export class GeminiImageProvider implements ImageGenProvider {
       );
     }
     if (json.promptFeedback?.blockReason) {
-      throw new Error(`Prompt bloqueado: ${json.promptFeedback.blockReason}`);
+      throw new Error(formatGeminiNoImageError(json));
     }
 
     const responseParts = json.candidates?.[0]?.content?.parts ?? [];
     const imagePart = responseParts.find((p) => p.inlineData?.data);
     if (!imagePart?.inlineData?.data) {
-      const finish = json.candidates?.[0]?.finishReason;
-      const textHint = responseParts
-        .map((p) => p.text)
-        .filter(Boolean)
-        .join(" ")
-        .slice(0, 200);
-      throw new Error(
-        textHint
-          ? `Gemini não retornou imagem: ${textHint}`
-          : `Gemini não retornou imagem${finish ? ` (${finish})` : ""}`
-      );
+      throw new Error(formatGeminiNoImageError(json));
     }
 
     return {

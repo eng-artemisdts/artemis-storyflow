@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StepSidebar } from "@/components/project/step-sidebar";
 import { StaticStepSidebar } from "@/components/project/static-step-sidebar";
+import { ProjectMain } from "@/components/project/project-main";
 import { VideoKindRouteGuard } from "@/components/project/video-kind-route-guard";
+import { resolveAccessibleUploadUrl } from "@/lib/local-uploads";
 import { resolveVideoKind } from "@/lib/video-kind";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,7 @@ export default async function ProjectLayout({
 
   const videoKind = resolveVideoKind(project.videoKind);
   const isStatic = videoKind === "static";
+  const accessibleAudioUrl = await resolveAccessibleUploadUrl(project.audioUrl);
 
   const analyzed = project._count.scenes > 0;
   const assetsDone =
@@ -91,14 +94,19 @@ export default async function ProjectLayout({
             projectId={project.id}
             hasScript={Boolean(project.script?.trim())}
             hasStyle={Boolean(project.styleId)}
-            hasAudio={Boolean(project.audioUrl?.trim())}
+            hasAudio={Boolean(accessibleAudioUrl)}
             hasTranscription={Boolean(project.transcriptionJson?.trim())}
             hasBrolls={Boolean(project.brollsJson?.trim())}
+            hasEditorReady={
+              Boolean(accessibleAudioUrl) && Boolean(project.brollsJson?.trim())
+            }
           />
         ) : (
           <StepSidebar projectId={project.id} progress={progress} />
         )}
-        <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+          <ProjectMain>{children}</ProjectMain>
+        </main>
       </div>
     </div>
   );

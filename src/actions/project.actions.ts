@@ -11,9 +11,10 @@ import {
   SaveProjectStyleSchema,
   SaveVideoAspectRatioSchema,
 } from "@/lib/schemas/actions";
-import { getStylePreset } from "@/lib/style-presets";
+import { resolveStylePreset } from "@/lib/resolve-style-preset";
 import { fillMasterPrompt } from "@/lib/narrative/fill-master-prompt";
 import { toNarrativeConfig } from "@/lib/narrative/channel-config";
+import type { ChannelTypeId } from "@/lib/narrative/channel-types";
 import { DEFAULT_AI_PROVIDERS } from "@/lib/ai-settings";
 
 export async function createProject(input: {
@@ -40,7 +41,10 @@ export async function createProject(input: {
   const trimmedTopic = videoKind === "static" ? videoTopic.trim() : "";
   const narrativePrompt =
     videoKind === "static" && trimmedTopic
-      ? fillMasterPrompt(toNarrativeConfig(channel, targetDurationMin), trimmedTopic)
+      ? fillMasterPrompt(toNarrativeConfig(channel, targetDurationMin), trimmedTopic, {
+          channelType: channel.channelType as ChannelTypeId,
+          masterPromptTemplate: channel.masterPromptTemplate,
+        })
       : null;
 
   const project = await prisma.project.create({
@@ -116,7 +120,7 @@ export async function saveProjectStyle(input: {
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
 
   const { projectId, styleId } = parsed.data;
-  if (styleId && !getStylePreset(styleId)) {
+  if (styleId && !(await resolveStylePreset(styleId))) {
     return fail(`Estilo desconhecido: "${styleId}"`);
   }
 

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { ChannelForm } from "@/components/channel/channel-form";
 import type { VideoAspectRatio } from "@/lib/video-aspect";
+import type { ChannelTypeId } from "@/lib/narrative/channel-types";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,12 @@ export default async function ChannelSettingsPage({
           videoAspectRatio: channel.videoAspectRatio as VideoAspectRatio,
           targetDurationMin: channel.targetDurationMin,
           outputLanguage: channel.outputLanguage,
+          channelType: channel.channelType as ChannelTypeId,
+          channelTypeDescription: channel.channelTypeDescription,
+          hasReferenceCharacter: channel.hasReferenceCharacter,
+          referenceCharacterName: channel.referenceCharacterName,
+          referenceCharacterDescription: channel.referenceCharacterDescription,
+          narrationType: channel.narrationType as "second-person" | "first-person" | "third-person",
           addressForm: channel.addressForm,
           forbiddenForms: channel.forbiddenForms,
           suspensePhrase: channel.suspensePhrase,

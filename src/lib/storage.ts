@@ -29,7 +29,18 @@ class LocalStorageService implements StorageService {
   async saveBuffer(data: Buffer, keyHint: string, ext: string): Promise<string> {
     const fileName = `${keyHint}-${Date.now()}${ext}`;
     await mkdir(this.uploadsDir, { recursive: true });
-    await writeFile(path.join(this.uploadsDir, fileName), data);
+    try {
+      await writeFile(path.join(this.uploadsDir, fileName), data);
+    } catch (err) {
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String((err as NodeJS.ErrnoException).code)
+          : "";
+      if (code === "ENOSPC") {
+        throw new Error("Disco cheio — libere espaço e tente novamente.");
+      }
+      throw err;
+    }
     return `/uploads/${fileName}`;
   }
 }

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { resolveAccessibleUploadUrl } from "@/lib/local-uploads";
 import { parseProjectTranscription } from "@/lib/transcription";
 import { TranscriptionStep } from "@/components/script/transcription-step";
 
@@ -22,18 +23,21 @@ export default async function StaticTranscriptionPage({
   });
   if (!project) notFound();
 
+  const resolvedAudioUrl = await resolveAccessibleUploadUrl(project.audioUrl);
+
   return (
     <div className="mx-auto flex h-full w-full min-w-0 max-w-4xl flex-col overflow-x-hidden px-6 py-8">
       <div className="mb-6 shrink-0">
         <h1 className="text-2xl font-semibold tracking-tight">Transcrição</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Gere o texto alinhado ao áudio com timestamps (AudioShake) para legendas e edição.
+          Gere o texto alinhado ao áudio com timestamps para legendas e edição.
+          Escolha o provedor (AudioShake ou OpenAI Whisper) aqui ou em Configurações.
         </p>
       </div>
       <TranscriptionStep
         projectId={project.id}
         projectName={project.name}
-        audioUrl={project.audioUrl}
+        audioUrl={resolvedAudioUrl}
         initialTranscription={parseProjectTranscription(project.transcriptionJson)}
       />
     </div>

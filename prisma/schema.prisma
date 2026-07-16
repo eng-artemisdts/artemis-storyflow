@@ -22,6 +22,18 @@ model Channel {
   /// Duração média dos vídeos (min). WORD_/SCENES_ são derivados disso.
   targetDurationMin  Int      @default(10)
   outputLanguage     String
+  /// Tipo de narração: second-person | first-person | third-person
+  narrationType      String   @default("second-person")
+  /// Formato do canal: narrative-story | documentary | listicle | etc.
+  channelType        String   @default("narrative-story")
+  /// Descrição opcional do formato (obrigatória para tipo custom).
+  channelTypeDescription String @default("")
+  /// Master prompt template gerado por IA (null = usa template base do channelType).
+  masterPromptTemplate   String?
+  /// Personagem visual recorrente — storyboard anexado no flow de produção.
+  hasReferenceCharacter  Boolean  @default(false)
+  referenceCharacterName String   @default("")
+  referenceCharacterDescription String @default("")
   addressForm        String
   forbiddenForms     String
   /// Calculados a partir de targetDurationMin (armazenados para preview/audit).
@@ -68,6 +80,12 @@ model Project {
   transcriptionJson  String?
   /// Lista de b-rolls / cenas static (JSON): prompts + start/end.
   brollsJson         String?
+  /// Estado do mini-editor static (JSON): tracks, clips, duração.
+  editorJson         String?
+  /// URL pública do MP4 exportado (slideshow static).
+  exportedVideoUrl   String?
+  /// Status/progresso do job de export (JSON): status, progress, error, etc.
+  exportJson         String?
   createdAt          DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -151,4 +169,16 @@ model Whiteboard {
   nodes     String // JSON dos nós do React Flow
   edges     String // JSON das conexões
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+/// Estilo visual cadastrado pelo usuário (título + prompt).
+/// Reutilizável em qualquer projeto; id vai em Project.styleId.
+model CustomStyle {
+  id              String   @id @default(cuid())
+  title           String
+  prompt          String
+  /// Imagem de exemplo gerada a partir do prompt (card na tela de estilos).
+  previewImageUrl String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

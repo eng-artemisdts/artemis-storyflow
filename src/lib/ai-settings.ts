@@ -7,6 +7,8 @@ export const AiProvidersSchema = z.object({
   videoModel: z.string().min(1),
   llmProvider: z.string().min(1),
   llmModel: z.string().min(1),
+  transcriptionProvider: z.string().min(1).default("audioshake"),
+  transcriptionModel: z.string().min(1).default("alignment"),
 });
 
 export type AiProviders = z.infer<typeof AiProvidersSchema>;
@@ -27,6 +29,8 @@ export const DEFAULT_AI_PROVIDERS: AiProviders = {
   videoModel: "fal-ai/kling-video/v3/standard/image-to-video",
   llmProvider: "gemini",
   llmModel: "gemini-2.5-flash",
+  transcriptionProvider: "audioshake",
+  transcriptionModel: "alignment",
 };
 
 export const AI_SETTINGS_STORAGE_KEY = "storyflow.ai-settings.v1";
@@ -52,5 +56,11 @@ export function mergeProviders(
     videoModel: layers.map((l) => l?.videoModel).find(Boolean) ?? DEFAULT_AI_PROVIDERS.videoModel,
     llmProvider: layers.map((l) => l?.llmProvider).find(Boolean) ?? DEFAULT_AI_PROVIDERS.llmProvider,
     llmModel: layers.map((l) => l?.llmModel).find(Boolean) ?? DEFAULT_AI_PROVIDERS.llmModel,
+    transcriptionProvider:
+      layers.map((l) => l?.transcriptionProvider).find(Boolean) ??
+      DEFAULT_AI_PROVIDERS.transcriptionProvider,
+    transcriptionModel:
+      layers.map((l) => l?.transcriptionModel).find(Boolean) ??
+      DEFAULT_AI_PROVIDERS.transcriptionModel,
   };
 }

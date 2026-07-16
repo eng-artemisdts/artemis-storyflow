@@ -9,11 +9,18 @@ import { seedWhiteboard } from "@/lib/whiteboard-layout";
 import { fillMasterPrompt } from "@/lib/narrative/fill-master-prompt";
 import { generateNarrativeScriptText } from "@/lib/narrative/generate-narrative-script";
 import { toNarrativeConfig } from "@/lib/narrative/channel-config";
+import type { ChannelTypeId } from "@/lib/narrative/channel-types";
 import { ok, fail, type ActionResult } from "@/lib/action-result";
 import type { AiClientContext } from "@/lib/ai-settings";
 import {
+  analyzeScriptMarkdown,
+  type ScriptMarkdownAnalysis,
+} from "@/lib/narrative/parse-script-markdown";
+import { extractScriptMarkdown } from "@/lib/narrative/extract-script-markdown";
+import {
   AnalyzeScriptSchema,
   GenerateNarrativeScriptSchema,
+  ImportScriptMarkdownSchema,
   SaveScriptSchema,
 } from "@/lib/schemas/actions";
 
@@ -31,6 +38,50 @@ export async function saveScript(input: {
     });
     revalidatePath(`/projects/${parsed.data.projectId}`, "layout");
     return ok(undefined);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * Importa roteiro .md, analisa estrutura (frontmatter, cenas, palavras) e persiste.
+ */
+export async function importScriptMarkdown(input: {
+  projectId: string;
+  script: string;
+}): Promise<ActionResult<{ analysis: ScriptMarkdownAnalysis }>> {
+  const parsed = ImportScriptMarkdownSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
+
+  const script = extractScriptMarkdown(parsed.data.script);
+  const analysis = analyzeScriptMarkdown(script);
+  if (!analysis.valid) {
+    return fail(
+      analysis.warnings[0] ??
+        "Roteiro inválido — o corpo precisa ter pelo menos 50 palavras."
+    );
+  }
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: parsed.data.projectId },
+      select: { videoTopic: true },
+    });
+    if (!project) return fail("Projeto não encontrado");
+
+    const topicFromFile = analysis.topic?.trim();
+    await prisma.project.update({
+      where: { id: parsed.data.projectId },
+      data: {
+        script,
+        ...(topicFromFile && !project.videoTopic?.trim()
+          ? { videoTopic: topicFromFile }
+          : {}),
+      },
+    });
+
+    revalidatePath(`/projects/${parsed.data.projectId}`, "layout");
+    return ok({ analysis });
   } catch (err) {
     return fail(err);
   }
@@ -72,7 +123,10 @@ export async function generateNarrativeScript(input: {
       const apiKey = await resolveApiKey(projectId, providers.llmProvider);
       const durationMin = project.targetDurationMin ?? project.channel.targetDurationMin;
       const narrativeConfig = toNarrativeConfig(project.channel, durationMin);
-      const filledPrompt = fillMasterPrompt(narrativeConfig, videoTopic);
+      const filledPrompt = fillMasterPrompt(narrativeConfig, videoTopic, {
+        channelType: project.channel.channelType as ChannelTypeId,
+        masterPromptTemplate: project.channel.masterPromptTemplate,
+      });
       const script = await generateNarrativeScriptText({
         providerId: providers.llmProvider,
         apiKey,

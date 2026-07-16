@@ -38,7 +38,7 @@ export function MasterPromptPanel({
             <h2 className="text-sm font-medium">Master prompt</h2>
           </div>
           <p className="text-xs text-muted-foreground">
-            Preenchido com a config do canal + tópico do cadastro
+            Gerado a partir da config do canal + tópico do cadastro
             {videoTopic ? (
               <>
                 : <span className="text-foreground">{videoTopic}</span>

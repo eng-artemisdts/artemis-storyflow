@@ -9,14 +9,19 @@ import {
   applyImageStyle,
   applyVideoStyle,
   buildReferenceRolePrefix,
-  getStylePreset,
   resolveImageFamily,
   resolveVideoFamily,
 } from "@/lib/style-presets";
+import { resolveStylePreset } from "@/lib/resolve-style-preset";
 import type { GenerationJob, Project } from "@/generated/prisma/client";
 import { resolveVideoAspectRatio } from "@/lib/video-aspect";
 
-export type ImageTargetType = "character" | "scenario" | "scene_keyframe" | "broll";
+export type ImageTargetType =
+  | "character"
+  | "scenario"
+  | "scene_keyframe"
+  | "broll"
+  | "custom_style";
 export type JobTargetType = ImageTargetType | "scene_video";
 
 /** Máximo de jobs de vídeo rodando em paralelo por provedor. */
@@ -63,7 +68,7 @@ async function buildImageJobSpec(
   targetId: string
 ): Promise<ImageJobSpec> {
   // Estilo visual do projeto, adaptado ao dialeto do modelo de imagem.
-  const preset = getStylePreset(project.styleId);
+  const preset = await resolveStylePreset(project.styleId);
   const family = resolveImageFamily(project.imageModel ?? "");
 
   if (targetType === "character") {
@@ -88,6 +93,10 @@ async function buildImageJobSpec(
     if (!broll) throw new Error(`B-roll #${targetId} não encontrado`);
     // image_prompt já inclui o style suffix; enviamos como está (editável pelo usuário).
     return { prompt: broll.image_prompt, referenceImages: [] };
+  }
+
+  if (targetType === "custom_style") {
+    throw new Error("Use submitCustomStylePreviewJob para preview de estilo");
   }
 
   // Keyframe de cena: composição usando imagens de personagens/cenário
@@ -155,6 +164,71 @@ function parseBrollsFromProject(project: Project): Array<{
   } catch {
     return [];
   }
+}
+
+/**
+ * Gera imagem de exemplo a partir do prompt de um estilo customizado.
+ * `styleId` opcional: se omitido, usa target draft (só o job guarda a URL até o save).
+ */
+export async function submitCustomStylePreviewJob(
+  projectId: string,
+  stylePrompt: string,
+  styleId?: string | null
+): Promise<GenerationJob> {
+  const project = await loadProjectWithChannelAi(projectId);
+  if (!project.imageProvider || !project.imageModel) {
+    throw new Error("Configure o provedor e o modelo de imagem em Configurações.");
+  }
+
+  const prompt = stylePrompt.trim();
+  if (!prompt) throw new Error("Informe o prompt do estilo para gerar o preview.");
+
+  const targetId =
+    styleId?.trim() && !styleId.startsWith("draft-")
+      ? styleId.trim()
+      : `draft-${crypto.randomUUID()}`;
+
+  const apiKey = await resolveApiKey(projectId, project.imageProvider);
+  const provider = createImageProvider(project.imageProvider, apiKey, project.imageModel);
+  const imagePrompt = buildStylePreviewImagePrompt(prompt);
+
+  const job = await prisma.generationJob.create({
+    data: {
+      projectId,
+      kind: "image",
+      provider: project.imageProvider,
+      model: project.imageModel,
+      targetType: "custom_style",
+      targetId,
+      prompt,
+      status: "queued",
+    },
+  });
+
+  try {
+    const { jobId: externalId } = await provider.generateImage({
+      prompt: imagePrompt,
+      aspectRatio: "16:9",
+    });
+    return await prisma.generationJob.update({
+      where: { id: job.id },
+      data: { externalId, status: "running" },
+    });
+  } catch (err) {
+    return await prisma.generationJob.update({
+      where: { id: job.id },
+      data: { status: "failed", error: err instanceof Error ? err.message : String(err) },
+    });
+  }
+}
+
+/** Cena neutra + estilo — mostra a estética sem depender de conteúdo do roteiro. */
+export function buildStylePreviewImagePrompt(stylePrompt: string): string {
+  return [
+    "A high-quality cinematic still of a solitary traveler walking through a vast landscape at golden hour, dramatic sky, rich atmosphere, detailed environment.",
+    `Visual style: ${stylePrompt.trim()}`,
+    "Constraints: keep every element of the frame in this single cohesive style; no text, no watermark, no border, no logo.",
+  ].join(" ");
 }
 
 /**
@@ -419,7 +493,7 @@ export async function pumpVideoQueue(project: Project): Promise<void> {
 
   // Estilo visual do projeto, adaptado ao dialeto do modelo de vídeo
   // (Veo abre com o estilo, Kling/generic fecham, Omni exige cena única).
-  const preset = getStylePreset(resolved.styleId);
+  const preset = await resolveStylePreset(resolved.styleId);
   const videoFamily = resolveVideoFamily(resolved.videoModel);
 
   for (const job of pending) {
@@ -560,7 +634,11 @@ export async function syncJobStatus(jobId: string): Promise<GenerationJob> {
 
   const updated = await prisma.generationJob.update({
     where: { id: job.id },
-    data: { status: "succeeded", resultUrl: status.resultUrl, error: null },
+    data: {
+      status: "succeeded",
+      resultUrl: localUrl ?? status.resultUrl,
+      error: null,
+    },
   });
 
   if (localUrl) {
@@ -607,6 +685,16 @@ async function propagateResult(
         where: { id: projectId },
         data: { brollsJson: JSON.stringify(data) },
       });
+      break;
+    }
+    case "custom_style": {
+      // Drafts (`draft-…`) só existem no job; estilos salvos recebem a preview.
+      if (!targetId.startsWith("draft-")) {
+        await prisma.customStyle.updateMany({
+          where: { id: targetId },
+          data: { previewImageUrl: url },
+        });
+      }
       break;
     }
   }

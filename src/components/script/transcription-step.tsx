@@ -13,6 +13,19 @@ import {
 import { toast } from "sonner";
 import { AudioPlayer, type AudioPlayerHandle } from "@/components/audio-player";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { useAiSettings } from "@/hooks/use-ai-settings";
+import { AI_CONTEXT_HEADER } from "@/lib/ai-settings";
+import { encodeAiContextHeader } from "@/lib/ai-settings-storage";
+import { TRANSCRIPTION_PROVIDERS } from "@/lib/providers/models";
 import { cn } from "@/lib/utils";
 import {
   downloadTimestampJson,
@@ -39,10 +52,24 @@ export function TranscriptionStep({
 }) {
   const playerRef = useRef<AudioPlayerHandle>(null);
   const activeSegRef = useRef<HTMLButtonElement>(null);
+  const { hydrated, providers, setProviders } = useAiSettings();
   const [transcription, setTranscription] = useState(initialTranscription);
   const [isStarting, setIsStarting] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [providerId, setProviderId] = useState(providers.transcriptionProvider);
+  const [modelId, setModelId] = useState(providers.transcriptionModel);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    setProviderId(providers.transcriptionProvider);
+    setModelId(providers.transcriptionModel);
+  }, [hydrated, providers.transcriptionProvider, providers.transcriptionModel]);
+
+  const selectedProvider = useMemo(
+    () => TRANSCRIPTION_PROVIDERS.find((p) => p.id === providerId),
+    [providerId]
+  );
 
   const segments = transcription?.segments ?? [];
   const busy = isStarting || isPolling;
@@ -71,13 +98,24 @@ export function TranscriptionStep({
     setCurrentTime(t);
   }, []);
 
+  function persistProviderSelection(nextProvider: string, nextModel: string) {
+    setProviderId(nextProvider);
+    setModelId(nextModel);
+    setProviders({
+      ...providers,
+      transcriptionProvider: nextProvider,
+      transcriptionModel: nextModel,
+    });
+  }
+
   async function pollUntilDone(id: string) {
     setIsPolling(true);
     try {
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, i === 0 ? 1500 : 3000));
         const res = await fetch(
-          `/api/projects/${projectId}/transcription/status?taskId=${encodeURIComponent(id)}`
+          `/api/projects/${projectId}/transcription/status?taskId=${encodeURIComponent(id)}`,
+          { headers: { [AI_CONTEXT_HEADER]: encodeAiContextHeader() } }
         );
         const json = (await res.json()) as PollResponse;
         if (!json.ok) {
@@ -105,25 +143,48 @@ export function TranscriptionStep({
     }
     setIsStarting(true);
     try {
+      // Persiste seleção e monta o header a partir dos valores atuais (não do React state assíncrono).
+      setProviders({
+        ...providers,
+        transcriptionProvider: providerId,
+        transcriptionModel: modelId,
+      });
+
       const res = await fetch(`/api/projects/${projectId}/transcription`, {
         method: "POST",
+        headers: { [AI_CONTEXT_HEADER]: encodeAiContextHeader() },
       });
       const json = (await res.json()) as
-        | { ok: true; data: { taskId: string; usedScript: boolean } }
+        | {
+            ok: true;
+            data: {
+              taskId: string;
+              usedScript: boolean;
+              provider?: string;
+              status?: "processing" | "completed";
+              transcription?: ProjectTranscription;
+            };
+          }
         | { ok: false; error: string };
       if (!json.ok) {
         toast.error(json.error);
         return;
       }
+
+      if (json.data.status === "completed" && json.data.transcription) {
+        setTranscription(json.data.transcription);
+        toast.success("Transcrição concluída");
+        return;
+      }
+
       toast.message("Transcrição iniciada", {
-        description: json.data.usedScript
-          ? "Usando o roteiro do projeto para alinhar os timestamps."
-          : "Gerando texto e timestamps a partir do áudio.",
+        description: "Gerando texto e timestamps a partir do áudio.",
       });
       setIsStarting(false);
       await pollUntilDone(json.data.taskId);
     } catch {
       toast.error("Falha ao iniciar transcrição");
+    } finally {
       setIsStarting(false);
     }
   }
@@ -153,6 +214,59 @@ export function TranscriptionStep({
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4 overflow-x-hidden">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Provedor</Label>
+            <Select
+              value={providerId}
+              disabled={busy || !hydrated}
+              onValueChange={(next) => {
+                const opt = TRANSCRIPTION_PROVIDERS.find((p) => p.id === next);
+                persistProviderSelection(next, opt?.models[0]?.value ?? "");
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Provedor" />
+              </SelectTrigger>
+              <SelectContent>
+                {TRANSCRIPTION_PROVIDERS.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    <span className="flex items-center gap-2">
+                      {o.label}
+                      {!o.implemented && (
+                        <Badge variant="outline" className="text-[10px]">
+                          stub
+                        </Badge>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Modelo</Label>
+            <Select
+              value={modelId}
+              disabled={busy || !hydrated || !selectedProvider}
+              onValueChange={(next) => persistProviderSelection(providerId, next)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Modelo" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectedProvider?.models.map((m) => (
+                  <SelectItem key={m.value} value={m.value}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
         <AudioPlayer
           ref={playerRef}
@@ -161,7 +275,7 @@ export function TranscriptionStep({
           onTimeUpdate={handleTimeUpdate}
         />
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button onClick={handleTranscribe} disabled={busy}>
+          <Button onClick={handleTranscribe} disabled={busy || !hydrated}>
             {busy ? (
               <Loader2 className="size-4 animate-spin" />
             ) : transcription ? (
@@ -196,7 +310,13 @@ export function TranscriptionStep({
       {transcription ? (
         <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card/40">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5">
-            <h2 className="text-sm font-medium">Linhas</h2>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="text-sm font-medium">Linhas</h2>
+              <span className="truncate text-xs text-muted-foreground">
+                {transcription.source}
+                {transcription.model ? ` · ${transcription.model}` : ""}
+              </span>
+            </div>
             <span className="font-mono text-xs tabular-nums text-muted-foreground">
               {formatTimestamp(currentTime)}
             </span>

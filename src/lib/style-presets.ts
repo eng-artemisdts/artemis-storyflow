@@ -478,11 +478,55 @@ export const STYLE_PRESETS: StylePreset[] = [
 
 // ─── Helpers de aplicação ────────────────────────────────────────────────────
 
-/** Busca um preset pelo id (null/undefined/desconhecido → null). */
+/** Busca um preset built-in pelo id (null/undefined/desconhecido → null). */
 export function getStylePreset(styleId: string | null | undefined): StylePreset | null {
   if (!styleId) return null;
   return STYLE_PRESETS.find((p) => p.id === styleId) ?? null;
 }
+
+/**
+ * Converte um estilo cadastrado pelo usuário (título + prompt único)
+ * no formato StylePreset usado pelo pipeline de geração.
+ * O mesmo prompt alimenta todas as famílias de modelo.
+ */
+export function customStyleToPreset(style: {
+  id: string;
+  title: string;
+  prompt: string;
+}): StylePreset {
+  const prompt = style.prompt.trim();
+  const gptImage = `Style: ${prompt}. Constraints: keep every element of the frame in this single cohesive style; render no text, no watermark, no border.`;
+  const description =
+    prompt.length > 140 ? `${prompt.slice(0, 137).trimEnd()}…` : prompt;
+
+  return {
+    id: style.id,
+    label: style.title,
+    description,
+    icon: "✨",
+    image: {
+      "nano-banana": prompt,
+      flux: prompt,
+      "gpt-image": gptImage,
+      generic: prompt,
+    },
+    video: {
+      veo: prompt,
+      kling: prompt,
+      omni: `Style: ${prompt}`,
+      generic: prompt,
+    },
+    characterSheetHint: `Design the character in this visual style: ${prompt}`,
+    consistencyLock:
+      "Every element of the frame is rendered in the same cohesive custom style; keep the look identical across scenes.",
+  };
+}
+
+export type CustomStyleInput = {
+  id: string;
+  title: string;
+  prompt: string;
+};
 
 /**
  * Instrução de cena única para o Gemini Omni Flash.

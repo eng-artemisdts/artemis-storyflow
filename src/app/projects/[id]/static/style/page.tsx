@@ -13,10 +13,16 @@ export default async function StaticStylePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const project = await prisma.project.findUnique({
-    where: { id },
-    select: { id: true, styleId: true },
-  });
+  const [project, customStyles] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id },
+      select: { id: true, styleId: true },
+    }),
+    prisma.customStyle.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, title: true, prompt: true, previewImageUrl: true },
+    }),
+  ]);
   if (!project) notFound();
 
   return (
@@ -35,7 +41,11 @@ export default async function StaticStylePage({
           </Link>
         </Button>
       </div>
-      <StylePicker projectId={project.id} currentStyleId={project.styleId} />
+      <StylePicker
+        projectId={project.id}
+        currentStyleId={project.styleId}
+        initialCustomStyles={customStyles}
+      />
     </div>
   );
 }

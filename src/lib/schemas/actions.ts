@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { AiClientContextSchema } from "@/lib/ai-settings";
 
+export const NarrationTypeSchema = z.enum(["second-person", "first-person", "third-person"]);
+
+export const ChannelTypeSchema = z.enum([
+  "narrative-story",
+  "documentary",
+  "listicle",
+  "explainer",
+  "case-study",
+  "comparison",
+  "tutorial",
+  "custom",
+]);
+
 export const VideoAspectRatioSchema = z.enum(["16:9", "9:16"]);
 export { AiClientContextSchema };
 
@@ -15,15 +28,40 @@ export const CreateChannelSchema = z.object({
     .min(1, "Mínimo de 1 minuto")
     .max(120, "Máximo de 120 minutos"),
   outputLanguage: z.string().trim().min(1, "Idioma é obrigatório").max(120),
+  channelType: ChannelTypeSchema.default("narrative-story"),
+  channelTypeDescription: z.string().trim().max(2_000).optional().default(""),
+  hasReferenceCharacter: z.boolean().default(false),
+  referenceCharacterName: z.string().trim().max(120).optional().default(""),
+  referenceCharacterDescription: z.string().trim().max(1_000).optional().default(""),
+  narrationType: NarrationTypeSchema.default("second-person"),
   addressForm: z.string().trim().min(1).max(40),
   forbiddenForms: z.string().trim().min(1).max(300),
   suspensePhrase: z.string().trim().max(200).optional().default(""),
   concreteUnits: z.string().trim().max(500).optional().default(""),
   brandSignoff: z.string().trim().max(200).optional().default("none"),
+}).superRefine((data, ctx) => {
+  if (data.channelType === "custom" && data.channelTypeDescription.trim().length < 10) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Descreva o formato personalizado (mín. 10 caracteres)",
+      path: ["channelTypeDescription"],
+    });
+  }
+  if (data.hasReferenceCharacter && data.referenceCharacterName.trim().length < 1) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Informe o nome do personagem de referência",
+      path: ["referenceCharacterName"],
+    });
+  }
 });
 
 export const UpdateChannelSchema = CreateChannelSchema.extend({
   channelId: z.string().min(1),
+});
+
+export const PreviewChannelMasterPromptSchema = CreateChannelSchema.extend({
+  ai: AiClientContextSchema.optional(),
 });
 
 export const ChannelIdSchema = z.object({
@@ -80,6 +118,11 @@ export const SaveScriptSchema = z.object({
   script: z.string().max(200_000, "Roteiro grande demais"),
 });
 
+export const ImportScriptMarkdownSchema = z.object({
+  projectId: z.string().min(1),
+  script: z.string().trim().min(1, "Arquivo vazio").max(200_000, "Roteiro grande demais"),
+});
+
 export const GenerateBrollsSchema = z.object({
   projectId: z.string().min(1),
   ai: AiClientContextSchema.optional(),
@@ -98,6 +141,30 @@ export const SaveProjectStyleSchema = z.object({
   projectId: z.string().min(1),
   // null = sem estilo (prompts passam sem modificação)
   styleId: z.string().min(1).nullable(),
+});
+
+export const CreateCustomStyleSchema = z.object({
+  title: z.string().trim().min(1, "Informe o título").max(120),
+  prompt: z.string().trim().min(1, "Informe o prompt do estilo").max(4_000),
+  previewImageUrl: z.string().trim().min(1).max(2_000).nullable().optional(),
+});
+
+export const UpdateCustomStyleSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1, "Informe o título").max(120),
+  prompt: z.string().trim().min(1, "Informe o prompt do estilo").max(4_000),
+  previewImageUrl: z.string().trim().min(1).max(2_000).nullable().optional(),
+});
+
+export const DeleteCustomStyleSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const PreviewCustomStyleSchema = z.object({
+  projectId: z.string().min(1),
+  prompt: z.string().trim().min(1, "Informe o prompt do estilo").max(4_000),
+  styleId: z.string().min(1).optional(),
+  ai: AiClientContextSchema.optional(),
 });
 
 export const SuggestChannelFieldSchema = z.object({
@@ -194,11 +261,6 @@ export const UpdateBrollPromptSchema = z.object({
   projectId: z.string().min(1),
   brollId: z.number().int().positive(),
   imagePrompt: z.string().trim().min(1).max(8_000),
-});
-
-export const GenerateAllBrollImagesSchema = z.object({
-  projectId: z.string().min(1),
-  ai: AiClientContextSchema.optional(),
 });
 
 export const SaveWhiteboardSchema = z.object({

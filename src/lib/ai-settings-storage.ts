@@ -67,6 +67,15 @@ export function getAiClientContext(): AiClientContext {
   return { providers, apiKeys };
 }
 
+/** Header x-storyflow-ai-context (base64url) para fetch às API routes. */
+export function encodeAiContextHeader(): string {
+  const ctx = getAiClientContext();
+  return btoa(unescape(encodeURIComponent(JSON.stringify(ctx))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 export function apiKeyLast4(apiKeys: AiApiKeys, provider: string): string | null {
   const key = apiKeys[provider]?.trim();
   if (!key || key.length < 4) return null;

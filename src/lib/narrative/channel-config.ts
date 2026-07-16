@@ -3,11 +3,30 @@ import {
   deriveScriptLengthFromDuration,
   type ScriptLengthConfig,
 } from "@/lib/narrative/script-length";
+import {
+  DEFAULT_NARRATION_TYPE,
+  type NarrationTypeId,
+  resolveNarrationType,
+} from "@/lib/narrative/narration-types";
+import {
+  DEFAULT_CHANNEL_TYPE,
+  type ChannelTypeId,
+  resolveChannelType,
+} from "@/lib/narrative/channel-types";
+import {
+  buildReferenceCharacterSection,
+  resolveReferenceCharacterLabel,
+} from "@/lib/narrative/reference-character";
 
-/** Campos do CHANNEL CONFIG do master-prompt-narrativo. */
+/** Campos do CHANNEL CONFIG do master prompt. */
 export interface ChannelNarrativeConfig {
   niche: string;
   outputLanguage: string;
+  channelType: ChannelTypeId;
+  narrationType: NarrationTypeId;
+  hasReferenceCharacter: boolean;
+  referenceCharacterName: string;
+  referenceCharacterDescription: string;
   addressForm: string;
   forbiddenForms: string;
   wordMin: number;
@@ -92,6 +111,11 @@ export function toNarrativeConfig(
     niche: string;
     description?: string | null;
     outputLanguage: string;
+    channelType?: string | null;
+    narrationType?: string | null;
+    hasReferenceCharacter?: boolean | null;
+    referenceCharacterName?: string | null;
+    referenceCharacterDescription?: string | null;
     addressForm: string;
     forbiddenForms: string;
     wordMin: number;
@@ -126,6 +150,11 @@ export function toNarrativeConfig(
   return {
     niche,
     outputLanguage: channel.outputLanguage,
+    channelType: (channel.channelType as ChannelTypeId) ?? DEFAULT_CHANNEL_TYPE,
+    narrationType: (channel.narrationType as NarrationTypeId) ?? DEFAULT_NARRATION_TYPE,
+    hasReferenceCharacter: Boolean(channel.hasReferenceCharacter),
+    referenceCharacterName: channel.referenceCharacterName?.trim() ?? "",
+    referenceCharacterDescription: channel.referenceCharacterDescription?.trim() ?? "",
     addressForm: channel.addressForm,
     forbiddenForms: channel.forbiddenForms,
     ...length,
@@ -138,19 +167,17 @@ export function toNarrativeConfig(
 /** Monta o bloco CHANNEL CONFIG legível (para preview na UI). */
 export function formatChannelConfigBlock(config: ChannelNarrativeConfig): string {
   const brand = resolveBrandSignoff(config.brandSignoff);
+  const narration = resolveNarrationType(config.narrationType);
+  const channelType = resolveChannelType(config.channelType);
+  const refChar = resolveReferenceCharacterLabel(config);
   return [
     `NICHE:              ${config.niche}`,
     `OUTPUT_LANGUAGE:    ${config.outputLanguage}`,
+    `CHANNEL_TYPE:       ${channelType.id}`,
+    `NARRATION_TYPE:     ${narration.configLabel}`,
+    `REFERENCE_CHARACTER: ${refChar}`,
     `ADDRESS_FORM:       ${config.addressForm}`,
-    `FORBIDDEN_FORMS:    ${config.forbiddenForms}`,
-    `WORD_MIN:           ${config.wordMin}`,
     `WORD_TARGET:        ${config.wordTarget}`,
-    `WORD_MAX:           ${config.wordMax}`,
-    `SCENES_MIN:         ${config.scenesMin}`,
-    `SCENES_MAX:         ${config.scenesMax}`,
-    `SCENE_WORDS:        ${config.sceneWords}`,
-    `SUSPENSE_PHRASE:    ${config.suspensePhrase}`,
-    `CONCRETE_UNITS:     ${config.concreteUnits}`,
     `BRAND_SIGNOFF:      ${brand}`,
   ].join("\n");
 }

@@ -1,22 +1,19 @@
 import "server-only";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
+import { localUploadAbsolutePath } from "@/lib/local-uploads";
+import { resolveProviderApiKey } from "@/lib/credentials";
 import type {
   ProjectTranscription,
   TranscriptionSegment,
   TranscriptionWord,
 } from "@/lib/transcription";
+import { finalizeTranscriptionFromWords } from "@/lib/transcription";
 
 const AUDIOSHAKE_BASE = "https://api.audioshake.ai";
 
 export function getAudioshakeApiKey(): string {
-  const key = process.env.AUDIOSHAKE_API_KEY?.trim();
-  if (!key) {
-    throw new Error(
-      "AUDIOSHAKE_API_KEY não configurada. Defina no .env (dashboard.audioshake.ai → API Keys)."
-    );
-  }
-  return key;
+  return resolveProviderApiKey("audioshake");
 }
 
 type AudioshakeTarget = {
@@ -129,9 +126,9 @@ export async function readLocalUploadBuffer(publicUrl: string): Promise<{
     throw new Error("Áudio precisa estar em /uploads/ para transcrição local");
   }
   const relative = publicUrl.replace(/^\//, "");
-  const filePath = path.join(process.cwd(), "public", relative);
+  const filePath = localUploadAbsolutePath(publicUrl);
   const buffer = await readFile(filePath);
-  return { buffer, fileName: path.basename(filePath) };
+  return { buffer, fileName: path.basename(relative) };
 }
 
 /**
@@ -302,19 +299,25 @@ export async function downloadAndNormalizeTranscript(
   }
   const rawJson = await fileRes.json();
   const normalized = normalizeAudioshakeTranscriptJson(rawJson);
-  if (!normalized.text && normalized.segments.length === 0) {
+  const allWords = normalized.segments.flatMap((s) => s.words);
+  const finalized =
+    allWords.length > 0
+      ? finalizeTranscriptionFromWords(allWords, normalized.text)
+      : { text: normalized.text, segments: normalized.segments };
+
+  if (!finalized.text && finalized.segments.length === 0) {
     return { status: "error", error: "Transcrição vazia retornada pelo AudioShake" };
   }
 
   return {
     status: "completed",
     transcription: {
-      text: normalized.text,
+      text: finalized.text,
       language: target.language ?? null,
       model: "alignment",
       source: "audioshake",
       taskId,
-      segments: normalized.segments,
+      segments: finalized.segments,
     },
   };
 }

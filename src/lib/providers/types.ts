@@ -70,3 +70,4 @@ export interface ProviderConfig {
 export type ImageProviderId = "fal" | "replicate" | "gemini" | "openai";
 export type VideoProviderId = "fal" | "replicate" | "runway" | "kling" | "gemini" | "xai";
 export type LlmProviderId = "anthropic" | "openai" | "gemini";
+export type TranscriptionProviderId = "audioshake" | "openai";

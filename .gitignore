@@ -46,5 +46,9 @@ next-env.d.ts
 public/uploads/*
 !public/uploads/.gitkeep
 
+# remotion render cache
+.remotion-bundle/
+.data/
+
 # prisma sqlite
 prisma/dev.db*

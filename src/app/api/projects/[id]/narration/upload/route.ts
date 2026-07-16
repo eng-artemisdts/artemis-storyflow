@@ -63,7 +63,7 @@ export async function POST(
 
     await prisma.project.update({
       where: { id: project.id },
-      data: { audioUrl, audioSource: "upload", transcriptionJson: null, brollsJson: null },
+      data: { audioUrl, audioSource: "upload" },
     });
 
     revalidatePath(`/projects/${project.id}`, "layout");

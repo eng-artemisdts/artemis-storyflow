@@ -15,6 +15,8 @@ export function resolveAiProviders(
     videoModel?: string | null;
     llmProvider?: string | null;
     llmModel?: string | null;
+    transcriptionProvider?: string | null;
+    transcriptionModel?: string | null;
   } | null,
   _channel?: unknown
 ): AiProviders {
@@ -29,6 +31,8 @@ export function resolveAiProviders(
           videoModel: project.videoModel ?? undefined,
           llmProvider: project.llmProvider ?? undefined,
           llmModel: project.llmModel ?? undefined,
+          transcriptionProvider: project.transcriptionProvider ?? undefined,
+          transcriptionModel: project.transcriptionModel ?? undefined,
         }
       : null,
     DEFAULT_AI_PROVIDERS

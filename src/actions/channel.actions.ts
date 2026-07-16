@@ -12,11 +12,15 @@ import { ok, fail, type ActionResult } from "@/lib/action-result";
 import {
   ChannelIdSchema,
   CreateChannelSchema,
+  PreviewChannelMasterPromptSchema,
   SuggestChannelFieldSchema,
   UpdateChannelSchema,
 } from "@/lib/schemas/actions";
 import { deriveScriptLengthFromDuration } from "@/lib/narrative/script-length";
 import { LANGUAGE_PRESETS } from "@/lib/narrative/channel-config";
+import { generateChannelMasterPromptTemplate } from "@/lib/narrative/generate-channel-master-prompt";
+import type { ChannelTypeId } from "@/lib/narrative/channel-types";
+import type { NarrationTypeId } from "@/lib/narrative/narration-types";
 import { resolveLlmFromClient, runWithAiContext } from "@/lib/credentials";
 import type { AiClientContext } from "@/lib/ai-settings";
 import type { LlmProviderId } from "@/lib/providers/types";
@@ -34,52 +38,115 @@ function createSuggestionModel(providerId: string, apiKey: string, model: string
   }
 }
 
-export async function createChannel(input: {
+type ChannelFormPayload = {
   name: string;
   niche: string;
   description: string;
   videoAspectRatio: "16:9" | "9:16";
   targetDurationMin: number;
   outputLanguage: string;
+  channelType: ChannelTypeId;
+  channelTypeDescription?: string;
+  hasReferenceCharacter: boolean;
+  referenceCharacterName?: string;
+  referenceCharacterDescription?: string;
+  narrationType: NarrationTypeId;
   addressForm: string;
   forbiddenForms: string;
   suspensePhrase?: string;
   concreteUnits?: string;
   brandSignoff?: string;
+};
+
+async function generateMasterPromptForChannel(
+  data: ChannelFormPayload,
+  ai?: AiClientContext
+): Promise<string | null> {
+  if (!ai) return null;
+
+  return runWithAiContext(ai, async () => {
+    const llm = resolveLlmFromClient(ai);
+    const length = deriveScriptLengthFromDuration(data.targetDurationMin);
+    return generateChannelMasterPromptTemplate({
+      channelType: data.channelType,
+      channelTypeDescription: data.channelTypeDescription,
+      name: data.name,
+      niche: data.niche,
+      description: data.description,
+      outputLanguage: data.outputLanguage,
+      narrationType: data.narrationType,
+      targetDurationMin: data.targetDurationMin,
+      wordTarget: length.wordTarget,
+      scenesMin: length.scenesMin,
+      scenesMax: length.scenesMax,
+      hasReferenceCharacter: data.hasReferenceCharacter,
+      referenceCharacterName: data.referenceCharacterName,
+      referenceCharacterDescription: data.referenceCharacterDescription,
+      providerId: llm.providerId,
+      apiKey: llm.apiKey,
+      model: llm.model,
+    });
+  });
+}
+
+export async function previewChannelMasterPrompt(input: ChannelFormPayload & {
+  ai?: AiClientContext;
+}): Promise<ActionResult<{ masterPromptTemplate: string }>> {
+  const parsed = PreviewChannelMasterPromptSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
+
+  try {
+    const template = await generateMasterPromptForChannel(parsed.data, parsed.data.ai);
+    if (!template) {
+      return fail("Configure o provedor de LLM em Configurações para gerar o master prompt.");
+    }
+    return ok({ masterPromptTemplate: template });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function createChannel(input: ChannelFormPayload & {
+  ai?: AiClientContext;
 }): Promise<never | ActionResult> {
   const parsed = CreateChannelSchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
 
-  const {
-    name,
-    niche,
-    description,
-    videoAspectRatio,
-    targetDurationMin,
-    outputLanguage,
-    addressForm,
-    forbiddenForms,
-    suspensePhrase,
-    concreteUnits,
-    brandSignoff,
-  } = parsed.data;
+  const data = parsed.data;
+  const length = deriveScriptLengthFromDuration(data.targetDurationMin);
 
-  const length = deriveScriptLengthFromDuration(targetDurationMin);
+  let masterPromptTemplate: string | null = null;
+  try {
+    masterPromptTemplate = await generateMasterPromptForChannel(data, input.ai);
+  } catch {
+    // salva canal mesmo se IA falhar — usa template base do channelType em runtime
+  }
 
   const channel = await prisma.channel.create({
     data: {
-      name,
-      niche,
-      description,
-      videoAspectRatio,
-      targetDurationMin,
-      outputLanguage,
-      addressForm,
-      forbiddenForms,
+      name: data.name,
+      niche: data.niche,
+      description: data.description,
+      videoAspectRatio: data.videoAspectRatio,
+      targetDurationMin: data.targetDurationMin,
+      outputLanguage: data.outputLanguage,
+      channelType: data.channelType,
+      channelTypeDescription: data.channelTypeDescription ?? "",
+      masterPromptTemplate,
+      hasReferenceCharacter: data.hasReferenceCharacter,
+      referenceCharacterName: data.hasReferenceCharacter
+        ? (data.referenceCharacterName?.trim() ?? "")
+        : "",
+      referenceCharacterDescription: data.hasReferenceCharacter
+        ? (data.referenceCharacterDescription?.trim() ?? "")
+        : "",
+      narrationType: data.narrationType,
+      addressForm: data.addressForm,
+      forbiddenForms: data.forbiddenForms,
       ...length,
-      suspensePhrase: suspensePhrase ?? "",
-      concreteUnits: concreteUnits ?? "",
-      brandSignoff: brandSignoff?.trim() || "none",
+      suspensePhrase: data.suspensePhrase ?? "",
+      concreteUnits: data.concreteUnits ?? "",
+      brandSignoff: data.brandSignoff?.trim() || "none",
     },
   });
 
@@ -87,56 +154,50 @@ export async function createChannel(input: {
   redirect(`/channels/${channel.id}`);
 }
 
-export async function updateChannel(input: {
+export async function updateChannel(input: ChannelFormPayload & {
   channelId: string;
-  name: string;
-  niche: string;
-  description: string;
-  videoAspectRatio: "16:9" | "9:16";
-  targetDurationMin: number;
-  outputLanguage: string;
-  addressForm: string;
-  forbiddenForms: string;
-  suspensePhrase?: string;
-  concreteUnits?: string;
-  brandSignoff?: string;
+  ai?: AiClientContext;
 }): Promise<ActionResult> {
   const parsed = UpdateChannelSchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
 
-  const {
-    channelId,
-    name,
-    niche,
-    description,
-    videoAspectRatio,
-    targetDurationMin,
-    outputLanguage,
-    addressForm,
-    forbiddenForms,
-    suspensePhrase,
-    concreteUnits,
-    brandSignoff,
-  } = parsed.data;
+  const { channelId, ...data } = parsed.data;
+  const length = deriveScriptLengthFromDuration(data.targetDurationMin);
 
-  const length = deriveScriptLengthFromDuration(targetDurationMin);
+  let masterPromptTemplate: string | null | undefined = undefined;
+  try {
+    masterPromptTemplate = await generateMasterPromptForChannel(data, input.ai);
+  } catch {
+    masterPromptTemplate = undefined;
+  }
 
   try {
     await prisma.channel.update({
       where: { id: channelId },
       data: {
-        name,
-        niche,
-        description,
-        videoAspectRatio,
-        targetDurationMin,
-        outputLanguage,
-        addressForm,
-        forbiddenForms,
+        name: data.name,
+        niche: data.niche,
+        description: data.description,
+        videoAspectRatio: data.videoAspectRatio,
+        targetDurationMin: data.targetDurationMin,
+        outputLanguage: data.outputLanguage,
+        channelType: data.channelType,
+        channelTypeDescription: data.channelTypeDescription ?? "",
+        ...(masterPromptTemplate != null ? { masterPromptTemplate } : {}),
+        hasReferenceCharacter: data.hasReferenceCharacter,
+        referenceCharacterName: data.hasReferenceCharacter
+          ? (data.referenceCharacterName?.trim() ?? "")
+          : "",
+        referenceCharacterDescription: data.hasReferenceCharacter
+          ? (data.referenceCharacterDescription?.trim() ?? "")
+          : "",
+        narrationType: data.narrationType,
+        addressForm: data.addressForm,
+        forbiddenForms: data.forbiddenForms,
         ...length,
-        suspensePhrase: suspensePhrase ?? "",
-        concreteUnits: concreteUnits ?? "",
-        brandSignoff: brandSignoff?.trim() || "none",
+        suspensePhrase: data.suspensePhrase ?? "",
+        concreteUnits: data.concreteUnits ?? "",
+        brandSignoff: data.brandSignoff?.trim() || "none",
       },
     });
     revalidatePath(`/channels/${channelId}`);
@@ -166,7 +227,6 @@ const SuggestedSingleFieldSchema = z.object({
 
 /**
  * Gera nicho ou descrição com base no que já foi preenchido no formulário.
- * Usa LLM das Configurações globais (localStorage) ou .env.
  */
 export async function suggestChannelField(input: {
   field: "niche" | "description";
@@ -174,6 +234,7 @@ export async function suggestChannelField(input: {
   niche?: string;
   description?: string;
   outputLanguage?: string;
+  channelType?: ChannelTypeId;
   ai?: AiClientContext;
 }): Promise<ActionResult<{ value: string }>> {
   const parsed = SuggestChannelFieldSchema.safeParse(input);
@@ -200,20 +261,21 @@ export async function suggestChannelField(input: {
         name.trim() && `Channel name: ${name.trim()}`,
         niche.trim() && `Niche: ${niche.trim()}`,
         description.trim() && `Description: ${description.trim()}`,
+        input.channelType && `Channel format: ${input.channelType}`,
       ].filter(Boolean);
 
-      const nichePrompt = `You help configure a faceless narrative YouTube channel.
+      const nichePrompt = `You help configure a faceless YouTube channel.
 Write ONE concise niche line in ${language.outputLanguage} (max ~12 words).
-It should name the thematic territory (topics the monologues cover), not marketing fluff.
+It should name the thematic territory (topics the videos cover), not marketing fluff.
 
 Known context:
 ${contextLines.join("\n") || "(minimal)"}
 
 Return { "value": "..." } with only the niche line.`;
 
-      const descriptionPrompt = `You help configure a faceless narrative YouTube channel.
+      const descriptionPrompt = `You help configure a faceless YouTube channel.
 Write a short channel description in ${language.outputLanguage} (2–3 sentences).
-Cover: tone, audience promise, and what kinds of second-person stories it tells.
+Cover: tone, audience promise, and what kinds of videos it publishes.
 
 Known context:
 ${contextLines.join("\n") || "(minimal)"}

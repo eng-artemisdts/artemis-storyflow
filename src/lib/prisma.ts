@@ -6,7 +6,7 @@ import { PrismaClient } from "@/generated/prisma/client";
  * Evita reutilizar um PrismaClient antigo no `globalThis` após `prisma generate`
  * (hot-reload não reconstrói o singleton sozinho).
  */
-const PRISMA_CLIENT_VERSION = 10;
+const PRISMA_CLIENT_VERSION = 16;
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;

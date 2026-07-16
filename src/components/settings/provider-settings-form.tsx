@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
-import { IMAGE_PROVIDERS, LLM_PROVIDERS, VIDEO_PROVIDERS } from "@/lib/providers/models";
+import {
+  IMAGE_PROVIDERS,
+  LLM_PROVIDERS,
+  TRANSCRIPTION_PROVIDERS,
+  VIDEO_PROVIDERS,
+} from "@/lib/providers/models";
 import type { ProviderOption } from "@/lib/providers/models";
 import { useAiSettings } from "@/hooks/use-ai-settings";
 import { Button } from "@/components/ui/button";
@@ -109,6 +114,10 @@ export function ProviderSettingsForm() {
     provider: "gemini",
     model: "gemini-2.5-flash",
   });
+  const [transcription, setTranscription] = useState<Selection>({
+    provider: "audioshake",
+    model: "alignment",
+  });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -116,6 +125,10 @@ export function ProviderSettingsForm() {
     setImage({ provider: providers.imageProvider, model: providers.imageModel });
     setVideo({ provider: providers.videoProvider, model: providers.videoModel });
     setLlm({ provider: providers.llmProvider, model: providers.llmModel });
+    setTranscription({
+      provider: providers.transcriptionProvider,
+      model: providers.transcriptionModel,
+    });
   }, [hydrated, providers]);
 
   function handleSave() {
@@ -128,6 +141,8 @@ export function ProviderSettingsForm() {
         videoModel: video.model,
         llmProvider: llm.provider,
         llmModel: llm.model,
+        transcriptionProvider: transcription.provider,
+        transcriptionModel: transcription.model,
       });
       toast.success("Provedores salvos neste navegador");
     } finally {
@@ -138,6 +153,7 @@ export function ProviderSettingsForm() {
   if (!hydrated) {
     return (
       <div className="space-y-4">
+        <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
@@ -164,6 +180,12 @@ export function ProviderSettingsForm() {
         options={VIDEO_PROVIDERS}
         value={video}
         onChange={setVideo}
+      />
+      <ProviderModelPicker
+        title="Transcrição — timestamps da narração"
+        options={TRANSCRIPTION_PROVIDERS}
+        value={transcription}
+        onChange={setTranscription}
       />
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>

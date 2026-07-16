@@ -140,6 +140,27 @@ export const VIDEO_PROVIDERS: ProviderOption[] = [
   },
 ];
 
+export const TRANSCRIPTION_PROVIDERS: ProviderOption[] = [
+  {
+    id: "audioshake",
+    label: "AudioShake",
+    implemented: true,
+    keyUrl: "https://dashboard.audioshake.ai",
+    models: [
+      { value: "alignment", label: "Alignment (roteiro → timestamps)" },
+    ],
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    implemented: true,
+    keyUrl: "https://platform.openai.com/api-keys",
+    models: [
+      { value: "whisper-1", label: "Whisper-1 (timestamps word-level)" },
+    ],
+  },
+];
+
 export const LLM_PROVIDERS: ProviderOption[] = [
   {
     id: "anthropic",
@@ -184,4 +205,5 @@ export const CREDENTIAL_PROVIDERS: Array<{ id: string; label: string; keyUrl: st
   { id: "xai", label: "xAI (Grok)", keyUrl: "https://console.x.ai" },
   { id: "runway", label: "Runway", keyUrl: "https://dev.runwayml.com" },
   { id: "kling", label: "Kling", keyUrl: "https://app.klingai.com/global/dev" },
+  { id: "audioshake", label: "AudioShake", keyUrl: "https://dashboard.audioshake.ai" },
 ];
