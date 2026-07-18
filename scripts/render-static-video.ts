@@ -13,6 +13,10 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 import { prisma } from "../src/lib/prisma";
 import { buildStaticExportProps } from "../src/lib/editor/build-export-props";
 import {
+  ensureRemotionFfmpegCompatible,
+  formatRemotionMacosHint,
+} from "../src/lib/editor/patch-remotion-ffmpeg";
+import {
   exportWorkDir,
   remotionBundleCacheDir,
   remotionEntryPoint,
@@ -79,6 +83,13 @@ async function main() {
   });
 
   try {
+    const ffmpegPatch = await ensureRemotionFfmpegCompatible();
+    if (ffmpegPatch.patched) {
+      console.log(
+        `[export ${projectId}] Remotion FFmpeg patched for older macOS (${ffmpegPatch.reason})`
+      );
+    }
+
     const { props } = await buildStaticExportProps(projectId, origin);
 
     await writeFile(
@@ -165,7 +176,8 @@ async function main() {
     );
     console.log(`[export ${projectId}] done → ${videoUrl}`);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const raw = err instanceof Error ? err.message : String(err);
+    const message = formatRemotionMacosHint(raw);
     console.error(`[export ${projectId}] failed:`, message);
     await setExportState(projectId, {
       status: "error",

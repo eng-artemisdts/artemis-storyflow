@@ -9,11 +9,15 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RotateCcw,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { saveProjectStyle } from "@/actions/project.actions";
+import {
+  saveProjectStyle,
+  saveStylePromptOverride,
+} from "@/actions/project.actions";
 import {
   createCustomStyle,
   deleteCustomStyle,
@@ -26,7 +30,11 @@ import {
   encodeAiContextHeader,
   getAiClientContext,
 } from "@/lib/ai-settings-storage";
-import { STYLE_PRESETS } from "@/lib/style-presets";
+import {
+  getStylePresetEditablePrompt,
+  STYLE_PRESETS,
+  type StylePreset,
+} from "@/lib/style-presets";
 import { useImageGenErrorAlert } from "@/hooks/use-image-gen-error-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,20 +88,27 @@ export function StylePicker({
   projectId,
   currentStyleId,
   initialCustomStyles = [],
+  initialPromptOverrides = {},
 }: {
   projectId: string;
   currentStyleId: string | null;
   initialCustomStyles?: CustomStyleDTO[];
+  initialPromptOverrides?: Record<string, string>;
 }) {
   const [selected, setSelected] = useState<string | null>(currentStyleId);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [customStyles, setCustomStyles] = useState(initialCustomStyles);
+  const [promptOverrides, setPromptOverrides] = useState(initialPromptOverrides);
   const [, startTransition] = useTransition();
   const { reportImageGenError, alertDialog } = useImageGenErrorAlert();
 
   useEffect(() => {
     setCustomStyles(initialCustomStyles);
   }, [initialCustomStyles]);
+
+  useEffect(() => {
+    setPromptOverrides(initialPromptOverrides);
+  }, [initialPromptOverrides]);
 
   function findLabel(styleId: string | null) {
     if (!styleId) return "Sem estilo";
@@ -134,6 +149,13 @@ export function StylePicker({
     setCustomStyles((prev) => prev.filter((s) => s.id !== id));
     if (selected === id) {
       setSelected(null);
+    }
+  }
+
+  function handlePresetPromptSaved(styleId: string, overrides: Record<string, string>) {
+    setPromptOverrides(overrides);
+    if (selected !== styleId) {
+      handleSelect(styleId);
     }
   }
 
@@ -211,7 +233,10 @@ export function StylePicker({
       )}
 
       <div>
-        <h2 className="mb-3 text-sm font-medium">Presets</h2>
+        <h2 className="mb-1 text-sm font-medium">Presets</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Clique no lápis para ajustar o prompt de cada estilo neste projeto.
+        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <button
             type="button"
@@ -234,21 +259,44 @@ export function StylePicker({
 
           {STYLE_PRESETS.map((preset) => {
             const isActive = selected === preset.id;
+            const override = promptOverrides[preset.id];
+            const displayPrompt = override ?? preset.description;
             return (
-              <button
+              <div
                 key={preset.id}
-                type="button"
-                onClick={() => handleSelect(preset.id)}
                 className={cn(
-                  "group relative flex flex-col items-start gap-2 rounded-xl border bg-card p-5 text-left transition-colors hover:border-primary/50",
+                  "group relative flex flex-col overflow-hidden rounded-xl border bg-card text-left transition-colors",
                   isActive && "border-primary ring-2 ring-primary/30"
                 )}
               >
                 <SelectionBadge active={isActive} saving={savingId === preset.id} />
-                <span className="text-3xl leading-none">{preset.icon}</span>
-                <span className="font-medium">{preset.label}</span>
-                <span className="text-sm text-muted-foreground">{preset.description}</span>
-              </button>
+                <div className="absolute bottom-3 right-3 z-10">
+                  <PresetStylePromptDialog
+                    projectId={projectId}
+                    preset={preset}
+                    currentOverride={override ?? null}
+                    onSaved={handlePresetPromptSaved}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSelect(preset.id)}
+                  className="flex w-full flex-col items-start gap-2 p-5 pb-12 text-left transition-colors hover:bg-muted/30"
+                >
+                  <span className="text-3xl leading-none">{preset.icon}</span>
+                  <span className="flex items-center gap-2 font-medium">
+                    {preset.label}
+                    {override ? (
+                      <Badge variant="secondary" className="text-[10px] font-normal">
+                        prompt editado
+                      </Badge>
+                    ) : null}
+                  </span>
+                  <span className="line-clamp-3 text-sm text-muted-foreground">
+                    {displayPrompt}
+                  </span>
+                </button>
+              </div>
             );
           })}
         </div>
@@ -273,6 +321,125 @@ function SelectionBadge({ active, saving }: { active: boolean; saving: boolean }
     );
   }
   return null;
+}
+
+function PresetStylePromptDialog({
+  projectId,
+  preset,
+  currentOverride,
+  onSaved,
+}: {
+  projectId: string;
+  preset: StylePreset;
+  currentOverride: string | null;
+  onSaved: (styleId: string, overrides: Record<string, string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const defaultPrompt = getStylePresetEditablePrompt(preset);
+  const [prompt, setPrompt] = useState(currentOverride ?? defaultPrompt);
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) {
+      setPrompt(currentOverride ?? defaultPrompt);
+    }
+  }
+
+  function handleReset() {
+    setPrompt(defaultPrompt);
+  }
+
+  function handleSubmit() {
+    startTransition(async () => {
+      const trimmed = prompt.trim();
+      const isDefault = trimmed === defaultPrompt.trim();
+      const result = await saveStylePromptOverride({
+        projectId,
+        styleId: preset.id,
+        prompt: isDefault || !trimmed ? null : trimmed,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        isDefault || !trimmed
+          ? "Prompt restaurado ao padrão"
+          : "Prompt do estilo atualizado"
+      );
+      onSaved(preset.id, result.data.overrides);
+      setOpen(false);
+    });
+  }
+
+  const canSubmit = Boolean(prompt.trim()) && !isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 bg-background/80 opacity-70 backdrop-blur-sm hover:opacity-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Pencil className="size-3.5" />
+          <span className="sr-only">Editar prompt do estilo</span>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <DialogHeader>
+          <DialogTitle>Prompt — {preset.label}</DialogTitle>
+          <DialogDescription>
+            Personalize o prompt deste estilo neste projeto. Ele será aplicado a
+            imagens e vídeos no lugar do texto padrão do preset.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor={`preset-prompt-${preset.id}`}>Prompt do estilo</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={handleReset}
+                disabled={isPending || prompt === defaultPrompt}
+              >
+                <RotateCcw className="size-3" />
+                Restaurar padrão
+              </Button>
+            </div>
+            <Textarea
+              id={`preset-prompt-${preset.id}`}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="min-h-40 font-mono text-xs"
+              placeholder="Descreva iluminação, texturas, paleta, linguagem visual..."
+              maxLength={4000}
+              disabled={isPending}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => handleOpenChange(false)}
+            disabled={isPending}
+          >
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} disabled={!canSubmit}>
+            {isPending && <Loader2 className="size-4 animate-spin" />}
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function CustomStyleMenu({

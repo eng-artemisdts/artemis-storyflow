@@ -9,9 +9,15 @@ import {
   ProjectIdSchema,
   RenameProjectSchema,
   SaveProjectStyleSchema,
+  SaveStylePromptOverrideSchema,
   SaveVideoAspectRatioSchema,
 } from "@/lib/schemas/actions";
-import { resolveStylePreset } from "@/lib/resolve-style-preset";
+import {
+  parseStylePromptOverrides,
+  resolveStylePreset,
+  serializeStylePromptOverrides,
+} from "@/lib/resolve-style-preset";
+import { getStylePreset } from "@/lib/style-presets";
 import { fillMasterPrompt } from "@/lib/narrative/fill-master-prompt";
 import { toNarrativeConfig } from "@/lib/narrative/channel-config";
 import type { ChannelTypeId } from "@/lib/narrative/channel-types";
@@ -128,6 +134,48 @@ export async function saveProjectStyle(input: {
     await prisma.project.update({ where: { id: projectId }, data: { styleId } });
     revalidatePath(`/projects/${projectId}`, "layout");
     return ok(undefined);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function saveStylePromptOverride(input: {
+  projectId: string;
+  styleId: string;
+  prompt: string | null;
+}): Promise<ActionResult<{ overrides: Record<string, string> }>> {
+  const parsed = SaveStylePromptOverrideSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Dados inválidos");
+
+  const { projectId, styleId, prompt } = parsed.data;
+  if (!getStylePreset(styleId)) {
+    return fail("Só é possível editar o prompt de presets built-in.");
+  }
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { stylePromptOverrides: true },
+    });
+    if (!project) return fail("Projeto não encontrado");
+
+    const overrides = parseStylePromptOverrides(project.stylePromptOverrides);
+    const trimmed = prompt?.trim() ?? "";
+    if (trimmed) {
+      overrides[styleId] = trimmed;
+    } else {
+      delete overrides[styleId];
+    }
+
+    const serialized = serializeStylePromptOverrides(overrides);
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { stylePromptOverrides: serialized },
+    });
+    revalidatePath(`/projects/${projectId}`, "layout");
+    revalidatePath(`/projects/${projectId}/style`);
+    revalidatePath(`/projects/${projectId}/static/style`);
+    return ok({ overrides });
   } catch (err) {
     return fail(err);
   }

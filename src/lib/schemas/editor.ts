@@ -45,10 +45,71 @@ export const EditorTransitionSchema = z.enum([
 ]);
 export type EditorTransition = z.infer<typeof EditorTransitionSchema>;
 
+/** Motion contínuo nas imagens estáticas (durante o hold do clipe). */
+export const EditorImageMotionSchema = z.enum([
+  "none",
+  "ken-burns",
+  "zoom-in",
+  "zoom-out",
+  "drift",
+  "random",
+]);
+export type EditorImageMotion = z.infer<typeof EditorImageMotionSchema>;
+
+/** Estilos de legenda no mini-editor static. */
+export const EditorCaptionStyleSchema = z.enum([
+  "off",
+  "boxed",
+  "outline",
+  "karaoke",
+  "minimal",
+]);
+export type EditorCaptionStyle = z.infer<typeof EditorCaptionStyleSchema>;
+
+export const EditorCaptionPositionSchema = z.enum(["bottom", "middle"]);
+export type EditorCaptionPosition = z.infer<typeof EditorCaptionPositionSchema>;
+
+/** Famílias tipográficas disponíveis para legendas. */
+export const EditorCaptionFontSchema = z.enum([
+  "impact",
+  "arial-black",
+  "helvetica",
+  "georgia",
+  "mono",
+]);
+export type EditorCaptionFont = z.infer<typeof EditorCaptionFontSchema>;
+
+const HexColorSchema = z
+  .string()
+  .regex(/^#[0-9A-Fa-f]{6}$/, "Cor inválida")
+  .default("#FFFFFF");
+
 export const EditorSettingsSchema = z.object({
   transition: EditorTransitionSchema.default("crossfade"),
   /** Duração da transição em ms (ignorado em `cut`). */
   transitionMs: z.number().int().min(0).max(2000).default(350),
+  /** Animação contínua da imagem (Ken Burns, zoom, drift, random). */
+  imageMotion: EditorImageMotionSchema.default("ken-burns"),
+  /** Intensidade do motion (0.5 = sutil, 1 = padrão, 1.5 = forte). */
+  imageMotionIntensity: z.number().min(0.5).max(1.5).default(1),
+  /** Estilo de legenda (`off` = desligado). Default boxed para já aparecer com transcrição. */
+  captionStyle: EditorCaptionStyleSchema.default("boxed"),
+  /** Escala tipográfica das legendas. */
+  captionScale: z.number().min(0.75).max(1.5).default(1),
+  /** Posição vertical das legendas. */
+  captionPosition: EditorCaptionPositionSchema.default("bottom"),
+  /** Fonte da legenda. */
+  captionFont: EditorCaptionFontSchema.default("arial-black"),
+  /** Cor do texto (#RRGGBB). */
+  captionColor: HexColorSchema.default("#FFFFFF"),
+  /** Cor do highlight karaoke (#RRGGBB). */
+  captionHighlightColor: HexColorSchema.default("#FFE566"),
+  /** Cor de fundo da caixa (#RRGGBB). */
+  captionBgColor: HexColorSchema.default("#000000"),
+  /** Opacidade do fundo da caixa (0–1). */
+  captionBgOpacity: z.number().min(0).max(1).default(0.72),
+  /** Força texto em maiúsculas. */
+  captionUppercase: z.boolean().default(false),
   musicUrl: z.string().nullable().default(null),
   /** Volume da música de fundo (0–1). */
   musicVolume: z.number().min(0).max(1).default(0.35),
@@ -59,6 +120,17 @@ export type EditorSettings = z.infer<typeof EditorSettingsSchema>;
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   transition: "crossfade",
   transitionMs: 350,
+  imageMotion: "ken-burns",
+  imageMotionIntensity: 1,
+  captionStyle: "boxed",
+  captionScale: 1,
+  captionPosition: "bottom",
+  captionFont: "arial-black",
+  captionColor: "#FFFFFF",
+  captionHighlightColor: "#FFE566",
+  captionBgColor: "#000000",
+  captionBgOpacity: 0.72,
+  captionUppercase: false,
   musicUrl: null,
   musicVolume: 0.35,
 };
@@ -93,6 +165,25 @@ export type StaticCompositionProps = {
   /** Frames de overlap no crossfade (padrão ~0,4s). */
   crossfadeFrames?: number;
   transition?: EditorTransition;
+  /** Motion contínuo nas stills (Ken Burns etc.). */
+  imageMotion?: EditorImageMotion;
+  imageMotionIntensity?: number;
+  /** Cues de legenda derivados da transcrição. */
+  captionCues?: Array<{
+    text: string;
+    startSec: number;
+    endSec: number;
+    words: Array<{ text: string; startSec: number; endSec: number }>;
+  }>;
+  captionStyle?: EditorCaptionStyle;
+  captionScale?: number;
+  captionPosition?: EditorCaptionPosition;
+  captionFont?: EditorCaptionFont;
+  captionColor?: string;
+  captionHighlightColor?: string;
+  captionBgColor?: string;
+  captionBgOpacity?: number;
+  captionUppercase?: boolean;
 };
 
 export const DEFAULT_STATIC_COMPOSITION_PROPS: StaticCompositionProps = {
@@ -106,4 +197,16 @@ export const DEFAULT_STATIC_COMPOSITION_PROPS: StaticCompositionProps = {
   backgroundColor: "#0a0a0a",
   crossfadeFrames: Math.round(EDITOR_FPS * 0.35),
   transition: "crossfade",
+  imageMotion: "ken-burns",
+  imageMotionIntensity: 1,
+  captionCues: [],
+  captionStyle: "boxed",
+  captionScale: 1,
+  captionPosition: "bottom",
+  captionFont: "arial-black",
+  captionColor: "#FFFFFF",
+  captionHighlightColor: "#FFE566",
+  captionBgColor: "#000000",
+  captionBgOpacity: 0.72,
+  captionUppercase: false,
 };

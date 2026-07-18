@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { resolveApiKey, runWithAiContext } from "@/lib/credentials";
 import { resolveAiProviders } from "@/lib/channel-ai";
-import { resolveStylePreset } from "@/lib/resolve-style-preset";
+import { resolveProjectStylePreset } from "@/lib/resolve-style-preset";
 import { parseProjectTranscription } from "@/lib/transcription";
 import {
   buildBrollsGenerationPromptParts,
@@ -60,7 +60,7 @@ export async function generateProjectBrolls(input: {
       }
 
       const apiKey = await resolveApiKey(projectId, providers.llmProvider);
-      const stylePreset = await resolveStylePreset(project.styleId);
+      const stylePreset = await resolveProjectStylePreset(project);
       const brolls = await generateBrollsFromTranscription({
         providerId: providers.llmProvider,
         apiKey,
@@ -118,7 +118,7 @@ export async function getBrollsGenerationPromptMd(input: {
       return fail("Gere a transcrição antes de exportar o prompt.");
     }
 
-    const stylePreset = await resolveStylePreset(project.styleId);
+    const stylePreset = await resolveProjectStylePreset(project);
     const { system, user } = buildBrollsGenerationPromptParts({
       transcription,
       stylePreset,

@@ -7,12 +7,26 @@ import {
   Sequence,
   interpolate,
   useCurrentFrame,
+  useVideoConfig,
 } from "remotion";
 import type {
+  EditorCaptionPosition,
+  EditorCaptionStyle,
+  EditorImageMotion,
   EditorTransition,
   StaticCompositionProps,
 } from "@/lib/schemas/editor";
 import { EDITOR_FPS } from "@/lib/schemas/editor";
+import {
+  computeImageMotion,
+  imageMotionCssTransform,
+} from "@/lib/editor/image-motion";
+import {
+  findActiveCaptionCue,
+  type CaptionAppearance,
+  type CaptionCue,
+} from "@/lib/editor/captions";
+import { CaptionOverlay } from "@/components/editor/caption-overlay";
 
 /** Crossfade padrão entre b-rolls (~0,35s), limitado a 1/4 da duração do clipe. */
 export const DEFAULT_CROSSFADE_FRAMES = Math.round(EDITOR_FPS * 0.35);
@@ -22,6 +36,7 @@ export const DEFAULT_CROSSFADE_FRAMES = Math.round(EDITOR_FPS * 0.35);
  *
  * A opacidade fica em 1 exatamente no intervalo [fromFrame, fromFrame+duration]
  * de cada b-roll. O fade / slide só ocorre nas bordas (antes/depois).
+ * Durante o hold, aplica motion contínuo (Ken Burns / zoom / drift).
  */
 export function StaticComposition({
   imageClips,
@@ -32,6 +47,18 @@ export function StaticComposition({
   durationInFrames,
   crossfadeFrames = DEFAULT_CROSSFADE_FRAMES,
   transition = "crossfade",
+  imageMotion = "ken-burns",
+  imageMotionIntensity = 1,
+  captionCues = [],
+  captionStyle = "boxed",
+  captionScale = 1,
+  captionPosition = "bottom",
+  captionFont = "arial-black",
+  captionColor = "#FFFFFF",
+  captionHighlightColor = "#FFE566",
+  captionBgColor = "#000000",
+  captionBgOpacity = 0.72,
+  captionUppercase = false,
 }: StaticCompositionProps) {
   return (
     <AbsoluteFill style={{ backgroundColor }}>
@@ -80,10 +107,29 @@ export function StaticComposition({
               opaqueStart={opaqueStart}
               opaqueEnd={opaqueEnd}
               transition={transition}
+              imageMotion={imageMotion}
+              imageMotionIntensity={imageMotionIntensity}
+              clipIndex={index}
             />
           </Sequence>
         );
       })}
+      {captionStyle !== "off" && captionCues.length > 0 ? (
+        <CaptionsLayer
+          cues={captionCues}
+          captionStyle={captionStyle}
+          captionScale={captionScale}
+          captionPosition={captionPosition}
+          appearance={{
+            font: captionFont,
+            color: captionColor,
+            highlightColor: captionHighlightColor,
+            bgColor: captionBgColor,
+            bgOpacity: captionBgOpacity,
+            uppercase: captionUppercase,
+          }}
+        />
+      ) : null}
       {audioSrc ? (
         <Sequence
           from={0}
@@ -117,18 +163,58 @@ export function StaticComposition({
   );
 }
 
+function CaptionsLayer({
+  cues,
+  captionStyle,
+  captionScale,
+  captionPosition,
+  appearance,
+}: {
+  cues: CaptionCue[];
+  captionStyle: EditorCaptionStyle;
+  captionScale: number;
+  captionPosition: EditorCaptionPosition;
+  appearance: CaptionAppearance;
+}) {
+  const frame = useCurrentFrame();
+  const { height } = useVideoConfig();
+  const currentSec = frame / EDITOR_FPS;
+  const cue = findActiveCaptionCue(cues, currentSec);
+  const baseFontPx = Math.round(height * 0.048);
+
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      <CaptionOverlay
+        cue={cue}
+        currentSec={currentSec}
+        captionStyle={captionStyle}
+        captionScale={captionScale}
+        captionPosition={captionPosition}
+        appearance={appearance}
+        baseFontPx={baseFontPx}
+      />
+    </AbsoluteFill>
+  );
+}
+
 function TransitionSlide({
   src,
   durationInFrames,
   opaqueStart,
   opaqueEnd,
   transition,
+  imageMotion,
+  imageMotionIntensity,
+  clipIndex,
 }: {
   src: string;
   durationInFrames: number;
   opaqueStart: number;
   opaqueEnd: number;
   transition: EditorTransition;
+  imageMotion: EditorImageMotion;
+  imageMotionIntensity: number;
+  clipIndex: number;
 }) {
   const frame = useCurrentFrame();
 
@@ -177,9 +263,23 @@ function TransitionSlide({
 
   const style = slideMotionStyle(transition, progressIn, progressOut, opacity);
 
+  // Progresso do Ken Burns no intervalo opaco do clipe (hold da cena).
+  const motionProgress = interpolate(
+    frame,
+    [opaqueStart, opaqueEnd],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
+
   return (
-    <AbsoluteFill style={style}>
-      <SafeSlideImage src={src} />
+    <AbsoluteFill style={{ ...style, overflow: "hidden" }}>
+      <SafeSlideImage
+        src={src}
+        imageMotion={imageMotion}
+        imageMotionIntensity={imageMotionIntensity}
+        clipIndex={clipIndex}
+        motionProgress={motionProgress}
+      />
     </AbsoluteFill>
   );
 }
@@ -232,7 +332,19 @@ function slideMotionStyle(
  * <img> nativo com decoding async — o Remotion <Img> chama image.decode()
  * e dispara EncodingError com muitas PNGs grandes na timeline.
  */
-function SafeSlideImage({ src }: { src: string }) {
+function SafeSlideImage({
+  src,
+  imageMotion,
+  imageMotionIntensity,
+  clipIndex,
+  motionProgress,
+}: {
+  src: string;
+  imageMotion: EditorImageMotion;
+  imageMotionIntensity: number;
+  clipIndex: number;
+  motionProgress: number;
+}) {
   const [failed, setFailed] = useState(false);
 
   if (failed) {
@@ -247,6 +359,14 @@ function SafeSlideImage({ src }: { src: string }) {
     );
   }
 
+  const motion = computeImageMotion(
+    motionProgress,
+    imageMotion,
+    clipIndex,
+    imageMotionIntensity
+  );
+  const transform = imageMotionCssTransform(motion);
+
   return (
     // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
     <img
@@ -260,6 +380,9 @@ function SafeSlideImage({ src }: { src: string }) {
         height: "100%",
         objectFit: "cover",
         display: "block",
+        transform,
+        transformOrigin: "center center",
+        willChange: transform === "none" ? undefined : "transform",
       }}
     />
   );

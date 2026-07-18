@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { StylePicker } from "@/components/style/style-picker";
 import { Button } from "@/components/ui/button";
+import { parseStylePromptOverrides } from "@/lib/resolve-style-preset";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function StaticStylePage({
   const [project, customStyles] = await Promise.all([
     prisma.project.findUnique({
       where: { id },
-      select: { id: true, styleId: true },
+      select: { id: true, styleId: true, stylePromptOverrides: true },
     }),
     prisma.customStyle.findMany({
       orderBy: { updatedAt: "desc" },
@@ -32,7 +33,8 @@ export default async function StaticStylePage({
           <h1 className="text-2xl font-semibold tracking-tight">Estilo visual</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             Escolha a estética das imagens do vídeo static. O estilo será aplicado aos
-            prompts de geração.
+            prompts de geração. Edite o prompt de cada preset se quiser ajustar a estética
+            neste projeto.
           </p>
         </div>
         <Button asChild variant={project.styleId ? "default" : "outline"}>
@@ -45,6 +47,7 @@ export default async function StaticStylePage({
         projectId={project.id}
         currentStyleId={project.styleId}
         initialCustomStyles={customStyles}
+        initialPromptOverrides={parseStylePromptOverrides(project.stylePromptOverrides)}
       />
     </div>
   );

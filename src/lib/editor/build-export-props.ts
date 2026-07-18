@@ -3,6 +3,7 @@ import {
   buildEditorStateFromAssets,
   editorStateToCompositionProps,
 } from "@/lib/editor/build-editor-state";
+import { buildCaptionCues } from "@/lib/editor/captions";
 import { parseEditorSettings } from "@/lib/editor/editor-settings";
 import { toAbsoluteAssetUrl } from "@/lib/editor/export-paths";
 import { ensureBrollsTimesInSeconds } from "@/lib/brolls/ensure-times";
@@ -42,6 +43,7 @@ export async function buildStaticExportProps(
   const brolls = await ensureBrollsTimesInSeconds(project.id);
   const transcription = parseProjectTranscription(project.transcriptionJson);
   const settings = parseEditorSettings(project.editorJson);
+  const captionCues = buildCaptionCues(transcription);
 
   const absoluteAudioUrl = toAbsoluteAssetUrl(project.audioUrl, origin);
   if (!absoluteAudioUrl) throw new Error("URL da narração inválida");
@@ -67,7 +69,11 @@ export async function buildStaticExportProps(
     ?.clips.some((c) => c.type === "image");
   if (!hasImages) throw new Error("Nenhuma imagem de cena para exportar");
 
-  const props = editorStateToCompositionProps(editorState, settings);
+  const props = editorStateToCompositionProps(
+    editorState,
+    settings,
+    captionCues
+  );
   const absolute: StaticCompositionProps = {
     ...props,
     audioSrc: absoluteAudioUrl,

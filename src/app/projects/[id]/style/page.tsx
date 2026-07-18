@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { StylePicker } from "@/components/style/style-picker";
+import { parseStylePromptOverrides } from "@/lib/resolve-style-preset";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,7 @@ export default async function StylePage({ params }: { params: Promise<{ id: stri
   const [project, customStyles] = await Promise.all([
     prisma.project.findUnique({
       where: { id },
-      select: { id: true, styleId: true },
+      select: { id: true, styleId: true, stylePromptOverrides: true },
     }),
     prisma.customStyle.findMany({
       orderBy: { updatedAt: "desc" },
@@ -26,13 +27,14 @@ export default async function StylePage({ params }: { params: Promise<{ id: stri
           Escolha a estética do projeto. O estilo é aplicado automaticamente a todos os
           prompts de imagem e vídeo, adaptado ao dialeto de prompting do modelo escolhido
           (Nano Banana, FLUX, GPT Image, Veo, Kling...), com reforço de consistência entre
-          as cenas.
+          as cenas. Você pode editar o prompt de cada preset neste projeto.
         </p>
       </div>
       <StylePicker
         projectId={project.id}
         currentStyleId={project.styleId}
         initialCustomStyles={customStyles}
+        initialPromptOverrides={parseStylePromptOverrides(project.stylePromptOverrides)}
       />
     </div>
   );

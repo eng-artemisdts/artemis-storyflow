@@ -12,7 +12,7 @@ import {
   resolveImageFamily,
   resolveVideoFamily,
 } from "@/lib/style-presets";
-import { resolveStylePreset } from "@/lib/resolve-style-preset";
+import { resolveProjectStylePreset } from "@/lib/resolve-style-preset";
 import type { GenerationJob, Project } from "@/generated/prisma/client";
 import { resolveVideoAspectRatio } from "@/lib/video-aspect";
 
@@ -68,7 +68,7 @@ async function buildImageJobSpec(
   targetId: string
 ): Promise<ImageJobSpec> {
   // Estilo visual do projeto, adaptado ao dialeto do modelo de imagem.
-  const preset = await resolveStylePreset(project.styleId);
+  const preset = await resolveProjectStylePreset(project);
   const family = resolveImageFamily(project.imageModel ?? "");
 
   if (targetType === "character") {
@@ -493,7 +493,7 @@ export async function pumpVideoQueue(project: Project): Promise<void> {
 
   // Estilo visual do projeto, adaptado ao dialeto do modelo de vídeo
   // (Veo abre com o estilo, Kling/generic fecham, Omni exige cena única).
-  const preset = await resolveStylePreset(resolved.styleId);
+  const preset = await resolveProjectStylePreset(resolved);
   const videoFamily = resolveVideoFamily(resolved.videoModel);
 
   for (const job of pending) {

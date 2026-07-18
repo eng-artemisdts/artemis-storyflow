@@ -2,11 +2,16 @@ import type { ProjectBroll, ProjectBrolls } from "@/lib/schemas/brolls";
 import { normalizeProjectBrollsTimes } from "@/lib/brolls/normalize-times";
 import {
   EDITOR_FPS,
+  type EditorCaptionFont,
+  type EditorCaptionPosition,
+  type EditorCaptionStyle,
   type EditorClip,
+  type EditorImageMotion,
   type EditorState,
   type EditorTransition,
   type StaticCompositionProps,
 } from "@/lib/schemas/editor";
+import type { CaptionCue } from "@/lib/editor/captions";
 import { resolveVideoAspectRatio } from "@/lib/video-aspect";
 
 export function secToFrames(sec: number, fps = EDITOR_FPS): number {
@@ -163,9 +168,21 @@ export function editorStateToCompositionProps(
   settings?: {
     transition?: EditorTransition;
     transitionMs?: number;
+    imageMotion?: EditorImageMotion;
+    imageMotionIntensity?: number;
+    captionStyle?: EditorCaptionStyle;
+    captionScale?: number;
+    captionPosition?: EditorCaptionPosition;
+    captionFont?: EditorCaptionFont;
+    captionColor?: string;
+    captionHighlightColor?: string;
+    captionBgColor?: string;
+    captionBgOpacity?: number;
+    captionUppercase?: boolean;
     musicUrl?: string | null;
     musicVolume?: number;
-  } | null
+  } | null,
+  captionCues: CaptionCue[] = []
 ): StaticCompositionProps {
   const fps = state.fps || EDITOR_FPS;
   const brollTrack = state.tracks.find((t) => t.id === "brolls");
@@ -187,6 +204,7 @@ export function editorStateToCompositionProps(
   const transitionMs = settings?.transitionMs ?? 350;
   const crossfadeFrames =
     transition === "cut" ? 0 : Math.round(fps * (transitionMs / 1000));
+  const captionStyle = settings?.captionStyle ?? "boxed";
 
   return {
     imageClips,
@@ -199,5 +217,17 @@ export function editorStateToCompositionProps(
     backgroundColor: "#0a0a0a",
     crossfadeFrames,
     transition,
+    imageMotion: settings?.imageMotion ?? "ken-burns",
+    imageMotionIntensity: settings?.imageMotionIntensity ?? 1,
+    captionCues: captionStyle === "off" ? [] : captionCues,
+    captionStyle,
+    captionScale: settings?.captionScale ?? 1,
+    captionPosition: settings?.captionPosition ?? "bottom",
+    captionFont: settings?.captionFont ?? "arial-black",
+    captionColor: settings?.captionColor ?? "#FFFFFF",
+    captionHighlightColor: settings?.captionHighlightColor ?? "#FFE566",
+    captionBgColor: settings?.captionBgColor ?? "#000000",
+    captionBgOpacity: settings?.captionBgOpacity ?? 0.72,
+    captionUppercase: settings?.captionUppercase ?? false,
   };
 }

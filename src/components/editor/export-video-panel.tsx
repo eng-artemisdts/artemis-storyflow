@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, Loader2, Film } from "lucide-react";
+import { Download, FolderDown, Loader2, Film } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectExportState } from "@/lib/editor/export-state";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ export function ExportVideoPanel({
 }) {
   const [state, setState] = useState(initialState);
   const [starting, setStarting] = useState(false);
+  const [exportingCapcut, setExportingCapcut] = useState(false);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/export`, {
@@ -88,12 +89,56 @@ export function ExportVideoPanel({
 
   const busy = starting || isBusy(state.status);
 
+  async function handleExportCapcut() {
+    setExportingCapcut(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/export/capcut`, {
+        cache: "no-store",
+      });
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!res.ok || !contentType.includes("application/zip")) {
+        let error = "Falha ao exportar para CapCut";
+        try {
+          const json = (await res.json()) as { error?: string };
+          if (json.error) error = json.error;
+        } catch {
+          /* ignore */
+        }
+        toast.error(error);
+        return;
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const fileName = match?.[1] ?? "projeto-capcut.zip";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      toast.message("Kit CapCut baixado", {
+        description:
+          "O CapCut 9 bloqueia drafts externos. Abra o ZIP e siga INSTRUCOES.md para importar mídia + legendas.",
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Erro ao exportar CapCut"
+      );
+    } finally {
+      setExportingCapcut(false);
+    }
+  }
+
   return (
     <section className="rounded-xl border bg-card/60 p-4 shadow-sm">
       <div className="mb-3 space-y-0.5">
         <h2 className="text-sm font-medium">Exportar vídeo</h2>
         <p className="text-xs text-muted-foreground">
-          Gera o MP4 final com cenas, narração, transição e música.
+          Gera o MP4 final com cenas, narração, transição e música. Também dá
+          para baixar um kit de mídia para montar no CapCut.
         </p>
       </div>
 
@@ -145,6 +190,21 @@ export function ExportVideoPanel({
             </a>
           </Button>
         ) : null}
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          disabled={exportingCapcut}
+          onClick={() => void handleExportCapcut()}
+        >
+          {exportingCapcut ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <FolderDown className="size-3.5" />
+          )}
+          {exportingCapcut ? "Gerando kit…" : "Exportar kit CapCut"}
+        </Button>
       </div>
     </section>
   );

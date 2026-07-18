@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "render:static": "tsx scripts/render-static-video.ts"
+    "render:static": "tsx scripts/render-static-video.ts",
+    "postinstall": "tsx scripts/patch-remotion-ffmpeg.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.14",

@@ -48,7 +48,7 @@ export default async function StaticEditPage({
       <div className="mb-4 shrink-0">
         <h1 className="text-2xl font-semibold tracking-tight">Edição</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Preview do slideshow, transição, música e exportação do MP4 final.
+          Preview do slideshow, legendas, música e exportação do MP4 final.
         </p>
       </div>
       <StaticEditView
@@ -60,6 +60,7 @@ export default async function StaticEditPage({
         imageCount={imageCount}
         totalBrolls={list.length}
         transcriptionDurationSec={transcriptionDurationSec(transcription)}
+        transcription={transcription}
         initialSettings={editorSettings}
         initialExportState={exportState}
       />

@@ -485,25 +485,28 @@ export function getStylePreset(styleId: string | null | undefined): StylePreset 
 }
 
 /**
- * Converte um estilo cadastrado pelo usuário (título + prompt único)
- * no formato StylePreset usado pelo pipeline de geração.
- * O mesmo prompt alimenta todas as famílias de modelo.
+ * Prompt “canônico” editável na UI para um preset built-in
+ * (usa a variante genérica de imagem como base).
  */
-export function customStyleToPreset(style: {
-  id: string;
-  title: string;
-  prompt: string;
-}): StylePreset {
-  const prompt = style.prompt.trim();
+export function getStylePresetEditablePrompt(preset: StylePreset): string {
+  return preset.image.generic;
+}
+
+/**
+ * Aplica um prompt único (override do usuário) sobre um StylePreset,
+ * mantendo id/label/icon/description e alimentando todas as famílias de modelo.
+ */
+export function applyStylePromptOverride(
+  preset: StylePreset,
+  promptOverride: string
+): StylePreset {
+  const prompt = promptOverride.trim();
+  if (!prompt) return preset;
+
   const gptImage = `Style: ${prompt}. Constraints: keep every element of the frame in this single cohesive style; render no text, no watermark, no border.`;
-  const description =
-    prompt.length > 140 ? `${prompt.slice(0, 137).trimEnd()}…` : prompt;
 
   return {
-    id: style.id,
-    label: style.title,
-    description,
-    icon: "✨",
+    ...preset,
     image: {
       "nano-banana": prompt,
       flux: prompt,
@@ -517,6 +520,50 @@ export function customStyleToPreset(style: {
       generic: prompt,
     },
     characterSheetHint: `Design the character in this visual style: ${prompt}`,
+    consistencyLock:
+      "Every element of the frame is rendered in the same cohesive style; keep the look identical across scenes.",
+  };
+}
+
+/**
+ * Converte um estilo cadastrado pelo usuário (título + prompt único)
+ * no formato StylePreset usado pelo pipeline de geração.
+ * O mesmo prompt alimenta todas as famílias de modelo.
+ */
+export function customStyleToPreset(style: {
+  id: string;
+  title: string;
+  prompt: string;
+}): StylePreset {
+  const prompt = style.prompt.trim();
+  const description =
+    prompt.length > 140 ? `${prompt.slice(0, 137).trimEnd()}…` : prompt;
+
+  const base = applyStylePromptOverride(
+    {
+      id: style.id,
+      label: style.title,
+      description,
+      icon: "✨",
+      image: {
+        "nano-banana": "",
+        flux: "",
+        "gpt-image": "",
+        generic: "",
+      },
+      video: {
+        veo: "",
+        kling: "",
+        omni: "",
+        generic: "",
+      },
+      characterSheetHint: "",
+      consistencyLock: "",
+    },
+    prompt
+  );
+  return {
+    ...base,
     consistencyLock:
       "Every element of the frame is rendered in the same cohesive custom style; keep the look identical across scenes.",
   };

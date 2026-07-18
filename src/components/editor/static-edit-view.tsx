@@ -26,18 +26,35 @@ import { toast } from "sonner";
 import { clearEditorMusic, saveEditorSettings } from "@/actions/editor.actions";
 import { EditSettingsPanel } from "@/components/editor/edit-settings-panel";
 import { ExportVideoPanel } from "@/components/editor/export-video-panel";
+import { CaptionOverlay } from "@/components/editor/caption-overlay";
 import { buildEditorStateFromAssets } from "@/lib/editor/build-editor-state";
+import {
+  buildCaptionCues,
+  findActiveCaptionCue,
+  type CaptionAppearance,
+  type CaptionCue,
+} from "@/lib/editor/captions";
 import { transitionNeedsDuration } from "@/lib/editor/editor-settings";
 import type { ProjectExportState } from "@/lib/editor/export-state";
 import type {
+  EditorCaptionPosition,
+  EditorCaptionStyle,
   EditorClip,
+  EditorImageMotion,
   EditorSettings,
   EditorState,
   EditorTransition,
 } from "@/lib/schemas/editor";
 import { DEFAULT_EDITOR_SETTINGS } from "@/lib/schemas/editor";
+import {
+  computeImageMotion,
+  imageMotionCssTransform,
+} from "@/lib/editor/image-motion";
 import type { ProjectBrolls } from "@/lib/schemas/brolls";
-import { formatTimestamp } from "@/lib/transcription";
+import {
+  formatTimestamp,
+  type ProjectTranscription,
+} from "@/lib/transcription";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -79,6 +96,7 @@ export function StaticEditView({
   brolls,
   imageCount,
   totalBrolls,
+  transcription = null,
   transcriptionDurationSec = null,
   initialSettings,
   initialExportState,
@@ -90,6 +108,7 @@ export function StaticEditView({
   brolls: ProjectBrolls | null;
   imageCount: number;
   totalBrolls: number;
+  transcription?: ProjectTranscription | null;
   transcriptionDurationSec?: number | null;
   initialSettings?: EditorSettings | null;
   initialExportState?: ProjectExportState | null;
@@ -135,6 +154,29 @@ export function StaticEditView({
   );
 
   const transitionMsSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intensitySaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captionScaleSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captionAppearanceSaveRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const pendingCaptionAppearanceRef = useRef<
+    Partial<
+      Pick<
+        EditorSettings,
+        | "captionFont"
+        | "captionColor"
+        | "captionHighlightColor"
+        | "captionBgColor"
+        | "captionBgOpacity"
+        | "captionUppercase"
+      >
+    >
+  >({});
+
+  const captionCues = useMemo(
+    () => buildCaptionCues(transcription),
+    [transcription]
+  );
 
   const persistTransitionMs = useCallback(
     (ms: number) => {
@@ -153,9 +195,94 @@ export function StaticEditView({
     [projectId, initialSettings]
   );
 
+  const persistImageMotionIntensity = useCallback(
+    (imageMotionIntensity: number) => {
+      setSettings((prev) => ({ ...prev, imageMotionIntensity }));
+      if (intensitySaveRef.current) clearTimeout(intensitySaveRef.current);
+      intensitySaveRef.current = setTimeout(() => {
+        startSaveSettings(async () => {
+          const result = await saveEditorSettings({
+            projectId,
+            settings: { imageMotionIntensity },
+          });
+          if (!result.ok) {
+            toast.error(result.error);
+            setSettings({ ...DEFAULT_EDITOR_SETTINGS, ...initialSettings });
+          }
+        });
+      }, 400);
+    },
+    [projectId, initialSettings]
+  );
+
+  const persistCaptionScale = useCallback(
+    (captionScale: number) => {
+      setSettings((prev) => ({ ...prev, captionScale }));
+      if (captionScaleSaveRef.current) clearTimeout(captionScaleSaveRef.current);
+      captionScaleSaveRef.current = setTimeout(() => {
+        startSaveSettings(async () => {
+          const result = await saveEditorSettings({
+            projectId,
+            settings: { captionScale },
+          });
+          if (!result.ok) {
+            toast.error(result.error);
+            setSettings({ ...DEFAULT_EDITOR_SETTINGS, ...initialSettings });
+          }
+        });
+      }, 400);
+    },
+    [projectId, initialSettings]
+  );
+
+  const persistCaptionAppearance = useCallback(
+    (
+      patch: Partial<
+        Pick<
+          EditorSettings,
+          | "captionFont"
+          | "captionColor"
+          | "captionHighlightColor"
+          | "captionBgColor"
+          | "captionBgOpacity"
+          | "captionUppercase"
+        >
+      >
+    ) => {
+      setSettings((prev) => ({ ...prev, ...patch }));
+      pendingCaptionAppearanceRef.current = {
+        ...pendingCaptionAppearanceRef.current,
+        ...patch,
+      };
+      if (captionAppearanceSaveRef.current) {
+        clearTimeout(captionAppearanceSaveRef.current);
+      }
+      captionAppearanceSaveRef.current = setTimeout(() => {
+        const toSave = pendingCaptionAppearanceRef.current;
+        pendingCaptionAppearanceRef.current = {};
+        startSaveSettings(async () => {
+          const result = await saveEditorSettings({
+            projectId,
+            settings: toSave,
+          });
+          if (!result.ok) {
+            toast.error(result.error);
+            setSettings({ ...DEFAULT_EDITOR_SETTINGS, ...initialSettings });
+          }
+        });
+      }, 400);
+    },
+    [projectId, initialSettings]
+  );
+
   useEffect(() => {
     return () => {
       if (transitionMsSaveRef.current) clearTimeout(transitionMsSaveRef.current);
+      if (intensitySaveRef.current) clearTimeout(intensitySaveRef.current);
+      if (captionScaleSaveRef.current) clearTimeout(captionScaleSaveRef.current);
+      if (captionAppearanceSaveRef.current) {
+        clearTimeout(captionAppearanceSaveRef.current);
+      }
     };
   }, []);
 
@@ -461,6 +588,7 @@ export function StaticEditView({
           settings={settings}
           busy={isUploadingMusic || isClearingMusic}
           musicInputRef={musicInputRef}
+          hasTranscription={captionCues.length > 0}
           onTransitionChange={(transition) => {
             const patch: Partial<EditorSettings> = { transition };
             if (!transitionNeedsDuration(transition)) patch.transitionMs = 0;
@@ -468,6 +596,16 @@ export function StaticEditView({
             persistSettings(patch);
           }}
           onTransitionMsChange={persistTransitionMs}
+          onImageMotionChange={(imageMotion) => persistSettings({ imageMotion })}
+          onImageMotionIntensityChange={persistImageMotionIntensity}
+          onCaptionStyleChange={(captionStyle) =>
+            persistSettings({ captionStyle })
+          }
+          onCaptionScaleChange={persistCaptionScale}
+          onCaptionPositionChange={(captionPosition) =>
+            persistSettings({ captionPosition })
+          }
+          onCaptionAppearanceChange={persistCaptionAppearance}
           onMusicVolumeChange={(musicVolume) => persistSettings({ musicVolume })}
           onMusicFile={(file) => handleMusicUpload(file)}
           onClearMusic={handleClearMusic}
@@ -504,8 +642,23 @@ export function StaticEditView({
                 <AudioSyncedSlideshow
                   clips={imageClips}
                   activeId={activeClip?.id ?? null}
+                  currentSec={currentSec}
                   transition={settings.transition}
                   transitionMs={transitionMs}
+                  imageMotion={settings.imageMotion}
+                  imageMotionIntensity={settings.imageMotionIntensity}
+                  captionCues={captionCues}
+                  captionStyle={settings.captionStyle}
+                  captionScale={settings.captionScale}
+                  captionPosition={settings.captionPosition}
+                  captionAppearance={{
+                    font: settings.captionFont,
+                    color: settings.captionColor,
+                    highlightColor: settings.captionHighlightColor,
+                    bgColor: settings.captionBgColor,
+                    bgOpacity: settings.captionBgOpacity,
+                    uppercase: settings.captionUppercase,
+                  }}
                 />
               )}
             </div>
@@ -651,19 +804,39 @@ function exitToStyle(t: EditorTransition): CSSProperties {
  * Empilha imagem atual + anterior com transição CSS animada.
  * A primeira cena aparece já “settled” (sem enter em opacity 0) para evitar
  * tela preta no Strict Mode do React, que cancela o rAF e reentra no effect.
+ * Motion contínuo (Ken Burns) é dirigido pelo tempo do áudio dentro do clipe.
  */
 function AudioSyncedSlideshow({
   clips,
   activeId,
+  currentSec,
   transition,
   transitionMs,
+  imageMotion,
+  imageMotionIntensity,
+  captionCues,
+  captionStyle,
+  captionScale,
+  captionPosition,
+  captionAppearance,
 }: {
   clips: EditorClip[];
   activeId: string | null;
+  currentSec: number;
   transition: EditorTransition;
   transitionMs: number;
+  imageMotion: EditorImageMotion;
+  imageMotionIntensity: number;
+  captionCues: CaptionCue[];
+  captionStyle: EditorCaptionStyle;
+  captionScale: number;
+  captionPosition: EditorCaptionPosition;
+  captionAppearance: CaptionAppearance;
 }) {
   const activeClip = clips.find((c) => c.id === activeId) ?? null;
+  const activeIndex = activeClip
+    ? clips.findIndex((c) => c.id === activeClip.id)
+    : -1;
   /** `undefined` = ainda não hidratou o id ativo (primeira cena sem animação). */
   const lastActiveIdRef = useRef<string | null | undefined>(undefined);
   const clipByIdRef = useRef(clips);
@@ -674,6 +847,7 @@ function AudioSyncedSlideshow({
   transitionMsRef.current = transitionMs;
 
   const [outgoing, setOutgoing] = useState<EditorClip | null>(null);
+  const [outgoingIndex, setOutgoingIndex] = useState(-1);
   const [entered, setEntered] = useState(true);
   const [flashOpacity, setFlashOpacity] = useState(0);
 
@@ -688,6 +862,7 @@ function AudioSyncedSlideshow({
       lastActiveIdRef.current = activeId;
       setEntered(true);
       setOutgoing(null);
+      setOutgoingIndex(-1);
       setFlashOpacity(0);
       return;
     }
@@ -701,8 +876,13 @@ function AudioSyncedSlideshow({
       lastId != null
         ? (clipByIdRef.current.find((c) => c.id === lastId) ?? null)
         : null;
+    const prevIndex =
+      lastId != null
+        ? clipByIdRef.current.findIndex((c) => c.id === lastId)
+        : -1;
     lastActiveIdRef.current = activeId;
     setOutgoing(prevClip);
+    setOutgoingIndex(prevIndex);
     setEntered(false);
 
     let raf2 = 0;
@@ -711,7 +891,10 @@ function AudioSyncedSlideshow({
     });
 
     const clearOutgoing = window.setTimeout(
-      () => setOutgoing(null),
+      () => {
+        setOutgoing(null);
+        setOutgoingIndex(-1);
+      },
       Math.max(currentTransitionMs, 50) + 80
     );
 
@@ -736,39 +919,43 @@ function AudioSyncedSlideshow({
 
   const animate = transitionNeedsDuration(transition);
   const css = transitionCss(transitionMs, animate);
+  const activeCaption =
+    captionStyle === "off"
+      ? null
+      : findActiveCaptionCue(captionCues, currentSec);
 
   return (
     <div className="relative size-full overflow-hidden bg-neutral-950">
       {outgoing ? (
-        // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
-        <img
+        <MotionSlideLayer
           key={`out-${outgoing.id}`}
-          src={outgoing.src}
-          decoding="async"
-          draggable={false}
-          className="absolute inset-0 size-full object-cover"
-          style={{
+          clip={outgoing}
+          clipIndex={Math.max(0, outgoingIndex)}
+          currentSec={outgoing.startSec + outgoing.durationSec}
+          transitionStyle={{
             zIndex: 1,
             transition: css,
             ...(entered ? exitToStyle(transition) : settleStyle(transition)),
           }}
+          imageMotion={imageMotion}
+          imageMotionIntensity={imageMotionIntensity}
         />
       ) : null}
       {activeClip ? (
-        // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
-        <img
+        <MotionSlideLayer
           key={`in-${activeClip.id}`}
-          src={activeClip.src}
-          decoding="async"
-          draggable={false}
-          className="absolute inset-0 size-full object-cover"
-          style={{
+          clip={activeClip}
+          clipIndex={Math.max(0, activeIndex)}
+          currentSec={currentSec}
+          transitionStyle={{
             zIndex: 2,
             transition: css,
             ...(entered
               ? settleStyle(transition)
               : enterFromStyle(transition)),
           }}
+          imageMotion={imageMotion}
+          imageMotionIntensity={imageMotionIntensity}
         />
       ) : (
         <div className="flex size-full items-center justify-center text-muted-foreground">
@@ -785,6 +972,66 @@ function AudioSyncedSlideshow({
           }}
         />
       ) : null}
+      <CaptionOverlay
+        cue={activeCaption}
+        currentSec={currentSec}
+        captionStyle={captionStyle}
+        captionScale={captionScale}
+        captionPosition={captionPosition}
+        appearance={captionAppearance}
+      />
+    </div>
+  );
+}
+
+/** Outer = transição entre cenas; inner img = Ken Burns syncado ao áudio. */
+function MotionSlideLayer({
+  clip,
+  clipIndex,
+  currentSec,
+  transitionStyle,
+  imageMotion,
+  imageMotionIntensity,
+}: {
+  clip: EditorClip;
+  clipIndex: number;
+  currentSec: number;
+  transitionStyle: CSSProperties;
+  imageMotion: EditorImageMotion;
+  imageMotionIntensity: number;
+}) {
+  const progress =
+    clip.durationSec > 0
+      ? Math.min(
+          1,
+          Math.max(0, (currentSec - clip.startSec) / clip.durationSec)
+        )
+      : 0;
+  const motion = computeImageMotion(
+    progress,
+    imageMotion,
+    clipIndex,
+    imageMotionIntensity
+  );
+  const transform = imageMotionCssTransform(motion);
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={transitionStyle}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text */}
+      <img
+        src={clip.src}
+        decoding="async"
+        draggable={false}
+        className="absolute inset-0 size-full object-cover"
+        style={{
+          transform,
+          transformOrigin: "center center",
+          willChange: transform === "none" ? undefined : "transform",
+        }}
+      />
     </div>
   );
 }

@@ -6,6 +6,29 @@ import {
   type EditorSettings,
   type EditorTransition,
 } from "@/lib/schemas/editor";
+import {
+  IMAGE_MOTION_OPTIONS,
+  type EditorImageMotion,
+  type ImageMotionOption,
+} from "@/lib/editor/image-motion";
+import {
+  CAPTION_COLOR_PRESETS,
+  CAPTION_FONT_OPTIONS,
+  CAPTION_POSITION_OPTIONS,
+  CAPTION_STYLE_OPTIONS,
+  type CaptionStyleOption,
+} from "@/lib/editor/captions";
+
+export {
+  IMAGE_MOTION_OPTIONS,
+  CAPTION_STYLE_OPTIONS,
+  CAPTION_POSITION_OPTIONS,
+  CAPTION_FONT_OPTIONS,
+  CAPTION_COLOR_PRESETS,
+  type EditorImageMotion,
+  type ImageMotionOption,
+  type CaptionStyleOption,
+};
 
 export function parseEditorPersisted(
   raw: string | null | undefined

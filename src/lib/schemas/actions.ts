@@ -143,6 +143,13 @@ export const SaveProjectStyleSchema = z.object({
   styleId: z.string().min(1).nullable(),
 });
 
+export const SaveStylePromptOverrideSchema = z.object({
+  projectId: z.string().min(1),
+  styleId: z.string().min(1),
+  /** null ou string vazia = remove o override e volta ao prompt padrão do preset */
+  prompt: z.string().max(4_000).nullable(),
+});
+
 export const CreateCustomStyleSchema = z.object({
   title: z.string().trim().min(1, "Informe o título").max(120),
   prompt: z.string().trim().min(1, "Informe o prompt do estilo").max(4_000),

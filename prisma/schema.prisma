@@ -68,6 +68,8 @@ model Project {
   llmProvider   String?
   llmModel      String?
   styleId            String? // preset de estilo visual (src/lib/style-presets.ts)
+  /// Overrides de prompt por styleId (JSON: { [styleId]: prompt }). Só presets built-in.
+  stylePromptOverrides String?
   targetDurationMin  Int? // duração alvo do vídeo em minutos
   videoAspectRatio   String  @default("16:9") // "16:9" | "9:16"
   /// Tipo de produção: motion (pipeline atual) | static (slideshow — etapas futuras).
