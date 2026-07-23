@@ -32,11 +32,31 @@ openssl rand -hex 32   # cole no ENCRYPTION_KEY do .env
 # 2. Banco
 pnpm prisma migrate dev
 
+# 2b. (opcional) Popular com o snapshot compartilhado
+pnpm db:seed
+
 # 3. Rodar
 pnpm dev
 ```
 
 Acesse http://localhost:3000, crie um projeto e cadastre suas chaves em **Configurações**.
+
+### Seed / clonar dados entre PCs
+
+O repositório inclui um snapshot em `prisma/seed-data.json` (canais, projetos, estilos, cenas etc.).
+
+```bash
+# Neste PC: atualizar o snapshot a partir do banco local
+pnpm db:export-seed
+
+# No outro PC: após migrate, importar o snapshot (substitui os dados existentes)
+pnpm prisma migrate dev
+pnpm db:seed
+```
+
+- Chaves de API **não** vão no seed (ficam no `.env` / Configurações do browser).
+- Jobs de geração (`GenerationJob`) não são seedados.
+- Áudio e imagens em `public/uploads/` **não** entram no JSON — se quiser mídia no outro PC, copie essa pasta à parte.
 
 ## Onde obter cada chave de API
 

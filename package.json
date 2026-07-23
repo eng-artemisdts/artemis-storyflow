@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:export-seed": "tsx prisma/export-seed.ts",
+    "db:seed": "tsx prisma/seed.ts",
     "electron:dev": "electron .",
     "desktop:prepare": "node desktop/prepare-standalone.cjs",
     "desktop:pack": "electron-builder --config electron-builder.yml",
@@ -15,6 +17,9 @@
     "desktop:build:mac": "pnpm desktop:prepare && electron-builder --config electron-builder.yml --mac",
     "desktop:build:win": "pnpm desktop:prepare && electron-builder --config electron-builder.yml --win",
     "desktop:build:linux": "pnpm desktop:prepare && electron-builder --config electron-builder.yml --linux"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.14",
