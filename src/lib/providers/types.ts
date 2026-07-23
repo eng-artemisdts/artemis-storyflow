@@ -67,7 +67,7 @@ export interface ProviderConfig {
   model: string;
 }
 
-export type ImageProviderId = "fal" | "replicate" | "gemini" | "openai";
+export type ImageProviderId = "fal" | "replicate" | "gemini" | "openai" | "google-flow";
 export type VideoProviderId = "fal" | "replicate" | "runway" | "kling" | "gemini" | "xai";
 export type LlmProviderId = "anthropic" | "openai" | "gemini";
-export type TranscriptionProviderId = "audioshake" | "openai";
+export type TranscriptionProviderId = "audioshake" | "openai" | "assemblyai";

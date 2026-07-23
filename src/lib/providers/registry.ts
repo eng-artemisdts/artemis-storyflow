@@ -7,6 +7,7 @@ import type {
   VideoGenProvider,
   VideoProviderId,
 } from "@/lib/providers/types";
+import { GoogleFlowImageProvider } from "@/lib/providers/google-flow/google-flow-image.provider";
 import { FalImageProvider } from "@/lib/providers/image/fal-image.provider";
 import { ReplicateImageProvider } from "@/lib/providers/image/replicate-image.provider";
 import { GeminiImageProvider } from "@/lib/providers/image/gemini-image.provider";
@@ -33,6 +34,7 @@ const imageProviders: Record<ImageProviderId, Factory<ImageGenProvider>> = {
   replicate: (c) => new ReplicateImageProvider(c),
   gemini: (c) => new GeminiImageProvider(c),
   openai: (c) => new OpenAIImageProvider(c),
+  "google-flow": (c) => new GoogleFlowImageProvider(c),
 };
 
 const videoProviders: Record<VideoProviderId, Factory<VideoGenProvider>> = {

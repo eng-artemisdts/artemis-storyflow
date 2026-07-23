@@ -13,6 +13,7 @@ import {
   Download,
   FileText,
   ImageIcon,
+  ImageOff,
   Loader2,
   Pencil,
   RefreshCw,
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  generateProjectBrolls,
+  clearProjectBrollImages,
   getBrollsGenerationPromptMd,
   refreshProjectBrollPromptsBatch,
   resetProjectBrolls,
@@ -42,6 +43,7 @@ import {
 import type { ProjectBroll, ProjectBrolls } from "@/lib/schemas/brolls";
 import { copyGoogleFlowPromptMd } from "@/lib/brolls/google-flow";
 import { normalizeProjectBrollsTimes } from "@/lib/brolls/normalize-times";
+import { streamProjectBrollsGeneration } from "@/lib/brolls/stream-brolls-client";
 import type { VideoAspectRatio } from "@/lib/video-aspect";
 import { FlowImportDialog } from "@/components/script/flow-import-dialog";
 import { useJobPolling, type PolledJob } from "@/hooks/use-job-polling";
@@ -124,8 +126,10 @@ export function ScenesBrollsView({
   const [flowImportOpen, setFlowImportOpen] = useState(false);
   const [flowPromptCopied, setFlowPromptCopied] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [clearImagesConfirmOpen, setClearImagesConfirmOpen] = useState(false);
   const [refreshPromptsConfirmOpen, setRefreshPromptsConfirmOpen] = useState(false);
   const [isAnalyzing, startAnalyze] = useTransition();
+  const [isClearingImages, startClearImages] = useTransition();
   const [isRefreshingPrompts, startRefreshPrompts] = useTransition();
   const [refreshPromptsProgress, setRefreshPromptsProgress] = useState<{
     done: number;
@@ -140,6 +144,9 @@ export function ScenesBrollsView({
     total: number;
     currentId: number | null;
   } | null>(null);
+  const [streamingSceneCount, setStreamingSceneCount] = useState<number | null>(
+    null
+  );
   const muteJobToastsRef = useRef(false);
   const { reportImageGenError, alertDialog } = useImageGenErrorAlert();
 
@@ -227,22 +234,52 @@ export function ScenesBrollsView({
   }
 
   async function runAnalyze() {
-    const result = await generateProjectBrolls({
-      projectId,
-      ai: getAiClientContext(),
+    setStreamingSceneCount(0);
+    setBrollsData({
+      brolls: [],
+      styleId: null,
+      styleLabel,
+      createdAt: new Date().toISOString(),
     });
-    if (result.ok) {
-      setBrollsData(
-        normalizeProjectBrollsTimes(
-          result.data.brolls,
-          transcriptionDurationSec(transcription)
-        )
-      );
-      setSelectedIds(new Set());
-      toast.success(`${result.data.brolls.brolls.length} b-rolls gerados`);
-      router.refresh();
-    } else {
-      toast.error(result.error);
+
+    const durationSec = transcriptionDurationSec(transcription);
+
+    const result = await streamProjectBrollsGeneration(projectId, {
+      onStarted: () => {
+        setStreamingSceneCount(0);
+      },
+      onPartial: (brolls, count) => {
+        setStreamingSceneCount(count);
+        setBrollsData((prev) =>
+          normalizeProjectBrollsTimes(
+            {
+              brolls,
+              styleId: prev?.styleId ?? null,
+              styleLabel: prev?.styleLabel ?? styleLabel,
+              createdAt: prev?.createdAt ?? new Date().toISOString(),
+            },
+            durationSec
+          )
+        );
+      },
+      onDone: (data) => {
+        setBrollsData(normalizeProjectBrollsTimes(data, durationSec));
+        setSelectedIds(new Set());
+        toast.success(`${data.brolls.length} b-rolls gerados`);
+        router.refresh();
+      },
+      onError: (error) => {
+        toast.error(error);
+      },
+    });
+
+    setStreamingSceneCount(null);
+
+    if (!result.ok) {
+      setBrollsData((prev) => {
+        if (prev?.brolls.length) return prev;
+        return initialBrolls;
+      });
     }
   }
 
@@ -265,6 +302,22 @@ export function ScenesBrollsView({
       setBrollsData(null);
       setSelectedIds(new Set());
       await runAnalyze();
+    });
+  }
+
+  function handleClearAllImages() {
+    setClearImagesConfirmOpen(false);
+    startClearImages(async () => {
+      const result = await clearProjectBrollImages({ projectId });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setBrollsData(result.data.brolls);
+      setSelectedIds(new Set());
+      setBusyTargets(new Set());
+      toast.success("Imagens removidas de todas as cenas");
+      router.refresh();
     });
   }
 
@@ -543,6 +596,42 @@ export function ScenesBrollsView({
         </Dialog>
 
         <Dialog
+          open={clearImagesConfirmOpen}
+          onOpenChange={setClearImagesConfirmOpen}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Remover todas as imagens?</DialogTitle>
+              <DialogDescription>
+                As imagens de todas as cenas serão removidas. A lista de cenas, os
+                prompts e os tempos serão preservados. Esta ação não pode ser
+                desfeita.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setClearImagesConfirmOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleClearAllImages}
+                disabled={isClearingImages}
+              >
+                {isClearingImages ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ImageOff className="size-4" />
+                )}
+                Remover imagens
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
           open={refreshPromptsConfirmOpen}
           onOpenChange={setRefreshPromptsConfirmOpen}
         >
@@ -580,6 +669,12 @@ export function ScenesBrollsView({
                 ) : (
                   <Badge variant="outline">Sem estilo selecionado</Badge>
                 )}
+                {isAnalyzing && streamingSceneCount !== null && (
+                  <Badge variant="default" className="gap-1">
+                    <Loader2 className="size-3 animate-spin" />
+                    Gerando cena {Math.max(streamingSceneCount, 1)}…
+                  </Badge>
+                )}
                 {list.length > 0 && (
                   <>
                     <Badge variant="secondary">{list.length} cenas</Badge>
@@ -598,8 +693,9 @@ export function ScenesBrollsView({
                 )}
               </div>
               <p className="max-w-2xl text-xs text-muted-foreground">
-                Selecione até {MAX_BATCH} cenas e gere as imagens uma a uma, ou copie os prompts
-                para o Google Flow e importe de volta — por ID no nome ou arrastando até a cena.
+                Selecione até {MAX_BATCH} cenas e use &quot;Gerar selecionadas&quot; (provedor de
+                imagem em Configurações — ex.: Google Flow via useapi). Alternativa manual: copie os
+                prompts para o Flow e importe de volta — por ID no nome ou arrastando até a cena.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -610,7 +706,10 @@ export function ScenesBrollsView({
                     size={list.length > 0 ? "icon" : "default"}
                     onClick={handleAnalyze}
                     disabled={
-                      isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                      isAnalyzing ||
+                      isRefreshingPrompts ||
+                      isGeneratingBatch ||
+                      isClearingImages
                     }
                     aria-label={
                       isAnalyzing
@@ -645,7 +744,10 @@ export function ScenesBrollsView({
                     variant="outline"
                     onClick={() => setRefreshPromptsConfirmOpen(true)}
                     disabled={
-                      isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                      isAnalyzing ||
+                      isRefreshingPrompts ||
+                      isGeneratingBatch ||
+                      isClearingImages
                     }
                   >
                     {isRefreshingPrompts ? (
@@ -668,9 +770,40 @@ export function ScenesBrollsView({
                         type="button"
                         variant="outline"
                         size="icon"
+                        onClick={() => setClearImagesConfirmOpen(true)}
+                        disabled={
+                          isAnalyzing ||
+                          isRefreshingPrompts ||
+                          isGeneratingBatch ||
+                          isClearingImages ||
+                          !list.some((b) => b.imageUrl)
+                        }
+                        aria-label="Remover apenas as imagens de todas as cenas"
+                        className="text-destructive hover:text-destructive"
+                      >
+                        {isClearingImages ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <ImageOff className="size-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Remover apenas as imagens de todas as cenas
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
                         onClick={() => setResetConfirmOpen(true)}
                         disabled={
-                          isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                          isAnalyzing ||
+                          isRefreshingPrompts ||
+                          isGeneratingBatch ||
+                          isClearingImages
                         }
                         aria-label="Remover todos os b-rolls e gerar novamente"
                         className="text-destructive hover:text-destructive"
@@ -789,18 +922,30 @@ export function ScenesBrollsView({
         <ScrollArea className="min-h-0 flex-1">
         <div className="py-4 pr-3">
           {isAnalyzing && list.length === 0 ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Card key={i} className="overflow-hidden py-0 gap-0">
-                  <div className="flex aspect-video items-center justify-center bg-muted/40">
-                    <Loader2 className="size-6 animate-spin text-muted-foreground" />
-                  </div>
-                  <CardContent className="space-y-2 p-4">
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
-                    <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="space-y-4">
+              <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 font-medium text-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Analisando transcrição e gerando cenas…
+                </div>
+                <p className="mt-1 text-xs">
+                  As cenas aparecerão aqui conforme o modelo for produzindo a
+                  lista.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Card key={i} className="overflow-hidden py-0 gap-0">
+                    <div className="flex aspect-video items-center justify-center bg-muted/40">
+                      <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                    </div>
+                    <CardContent className="space-y-2 p-4">
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+                      <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
           ) : list.length === 0 ? (
             <div className="rounded-xl border border-dashed bg-card/30 p-10 text-center">
@@ -812,7 +957,7 @@ export function ScenesBrollsView({
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {list.map((broll) => {
+              {list.map((broll, index) => {
                 const targetId = String(broll.id);
                 const narrationText = getNarrationTextForRange(
                   transcription,
@@ -822,6 +967,8 @@ export function ScenesBrollsView({
                 const selected = selectedIds.has(broll.id);
                 const isCurrentBatch =
                   batchProgress?.currentId === broll.id && isGeneratingBatch;
+                const isStreamingPartial =
+                  isAnalyzing && index === list.length - 1;
                 return (
                   <BrollCard
                     key={broll.id}
@@ -830,12 +977,18 @@ export function ScenesBrollsView({
                     narrationText={narrationText}
                     selected={selected}
                     selectionDisabled={
+                      isAnalyzing ||
                       isGeneratingBatch ||
                       isRefreshingPrompts ||
                       (!selected && selectedCount >= MAX_BATCH)
                     }
-                    interactionDisabled={isRefreshingPrompts}
-                    isGenerating={runningTargets.has(targetId) || isCurrentBatch}
+                    interactionDisabled={isAnalyzing || isRefreshingPrompts}
+                    isGenerating={
+                      runningTargets.has(targetId) ||
+                      isCurrentBatch ||
+                      isStreamingPartial
+                    }
+                    isStreamingPartial={isStreamingPartial}
                     onToggleSelect={() => toggleSelect(broll.id)}
                     onRegenerate={() => handleRegenerate(broll.id)}
                     onEditStarted={(jobId) => handleEditStarted(targetId, jobId)}
@@ -853,6 +1006,19 @@ export function ScenesBrollsView({
                   />
                 );
               })}
+              {isAnalyzing && (
+                <Card className="overflow-hidden border-dashed py-0 gap-0 opacity-80">
+                  <div className="flex aspect-video items-center justify-center bg-muted/30">
+                    <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                  </div>
+                  <CardContent className="space-y-2 p-4">
+                    <p className="text-sm font-medium">Próxima cena…</p>
+                    <p className="text-xs text-muted-foreground">
+                      Aguardando o modelo concluir a cena anterior.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
         </div>
@@ -870,6 +1036,7 @@ function BrollCard({
   selectionDisabled,
   interactionDisabled,
   isGenerating,
+  isStreamingPartial = false,
   onToggleSelect,
   onRegenerate,
   onEditStarted,
@@ -882,6 +1049,7 @@ function BrollCard({
   selectionDisabled: boolean;
   interactionDisabled: boolean;
   isGenerating: boolean;
+  isStreamingPartial?: boolean;
   onToggleSelect: () => void;
   onRegenerate: () => void;
   onEditStarted?: (jobId: string) => void;
@@ -973,8 +1141,13 @@ function BrollCard({
           </div>
         )}
         {isGenerating && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-black/50 backdrop-blur-[2px]">
             <Loader2 className="size-6 animate-spin text-white" />
+            {isStreamingPartial && (
+              <span className="text-[11px] font-medium text-white/90">
+                Gerando prompt…
+              </span>
+            )}
           </div>
         )}
         <div
@@ -1019,7 +1192,14 @@ function BrollCard({
             Sem texto da narração neste intervalo
           </p>
         )}
-        <p className="line-clamp-2 text-xs text-muted-foreground" title={broll.image_prompt}>
+        <p
+          className={cn(
+            "line-clamp-2 text-xs text-muted-foreground",
+            isStreamingPartial && broll.image_prompt === "Gerando prompt visual…" &&
+              "animate-pulse italic"
+          )}
+          title={broll.image_prompt}
+        >
           {broll.image_prompt}
         </p>
         <div

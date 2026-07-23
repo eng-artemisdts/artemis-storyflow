@@ -66,6 +66,17 @@ export const IMAGE_PROVIDERS: ProviderOption[] = [
       { value: "gpt-image-1", label: "GPT Image 1" },
     ],
   },
+  {
+    id: "google-flow",
+    label: "Google Flow (useapi)",
+    implemented: true,
+    keyUrl: "https://useapi.net/docs/start-here/setup-useapi",
+    models: [
+      { value: "nano-banana-2-lite", label: "Nano Banana 2 Lite (rápido)" },
+      { value: "nano-banana-2", label: "Nano Banana 2" },
+      { value: "nano-banana-pro", label: "Nano Banana Pro (até 10 refs)" },
+    ],
+  },
 ];
 
 export const VIDEO_PROVIDERS: ProviderOption[] = [
@@ -159,6 +170,16 @@ export const TRANSCRIPTION_PROVIDERS: ProviderOption[] = [
       { value: "whisper-1", label: "Whisper-1 (timestamps word-level)" },
     ],
   },
+  {
+    id: "assemblyai",
+    label: "AssemblyAI",
+    implemented: true,
+    keyUrl: "https://www.assemblyai.com/app/account",
+    models: [
+      { value: "universal-3-5-pro", label: "Universal-3.5 Pro (melhor precisão)" },
+      { value: "universal-2", label: "Universal-2 (rápido / cobertura de idiomas)" },
+    ],
+  },
 ];
 
 export const LLM_PROVIDERS: ProviderOption[] = [
@@ -206,4 +227,11 @@ export const CREDENTIAL_PROVIDERS: Array<{ id: string; label: string; keyUrl: st
   { id: "runway", label: "Runway", keyUrl: "https://dev.runwayml.com" },
   { id: "kling", label: "Kling", keyUrl: "https://app.klingai.com/global/dev" },
   { id: "audioshake", label: "AudioShake", keyUrl: "https://dashboard.audioshake.ai" },
+  { id: "assemblyai", label: "AssemblyAI", keyUrl: "https://www.assemblyai.com/app/account" },
+  { id: "google-flow", label: "useapi (Google Flow)", keyUrl: "https://useapi.net/docs/start-here/setup-useapi" },
+  {
+    id: "google-flow-email",
+    label: "Google Flow — email da conta",
+    keyUrl: "https://useapi.net/docs/start-here/setup-google-flow",
+  },
 ];

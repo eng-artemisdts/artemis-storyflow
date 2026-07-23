@@ -126,6 +126,52 @@ export async function resetProjectBrolls(input: {
 }
 
 /**
+ * Remove apenas as imagens de todas as cenas, preservando lista, prompts e
+ * tempos. Também cancela jobs de broll em andamento para que não reinsiram
+ * URLs antigas.
+ */
+export async function clearProjectBrollImages(input: {
+  projectId: string;
+}): Promise<ActionResult<{ brolls: ProjectBrolls }>> {
+  const parsed = ProjectIdSchema.safeParse(input);
+  if (!parsed.success) return fail("Projeto inválido");
+  const { projectId } = parsed.data;
+
+  try {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, videoKind: true, brollsJson: true },
+    });
+    if (!project || project.videoKind !== "static") {
+      return fail("Projeto static não encontrado");
+    }
+
+    const current = parseProjectBrolls(project.brollsJson);
+    if (!current?.brolls.length) {
+      return fail("Nenhuma lista de b-rolls para limpar");
+    }
+
+    const cleared: ProjectBrolls = {
+      ...current,
+      brolls: current.brolls.map((b) => ({ ...b, imageUrl: null })),
+    };
+
+    await prisma.generationJob.deleteMany({
+      where: { projectId, targetType: "broll" },
+    });
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { brollsJson: JSON.stringify(cleared) },
+    });
+
+    revalidateScenes(projectId);
+    return ok({ brolls: cleared });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
  * Atualiza os prompts de um LOTE de cenas (até 20 por chamada) com estilo,
  * canal e proporção atuais, preservando segmentação, tempos e imagens.
  * O cliente chama em lotes sequenciais para não estourar o timeout da

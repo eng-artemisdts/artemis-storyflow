@@ -78,8 +78,16 @@ function CredentialRow({
 
         <div className="ml-auto flex items-center gap-2">
           <Input
-            type="password"
-            placeholder={last4 ? "Substituir chave..." : "Colar chave de API..."}
+            type={provider.id === "google-flow-email" ? "email" : "password"}
+            placeholder={
+              provider.id === "google-flow-email"
+                ? last4
+                  ? "Substituir email..."
+                  : "conta@gmail.com"
+                : last4
+                  ? "Substituir chave..."
+                  : "Colar chave de API..."
+            }
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             className="w-56"
@@ -91,7 +99,11 @@ function CredentialRow({
               onSave(apiKey);
               setApiKey("");
             }}
-            disabled={apiKey.trim().length < 8}
+            disabled={
+              provider.id === "google-flow-email"
+                ? !apiKey.includes("@")
+                : apiKey.trim().length < 8
+            }
           >
             Salvar
           </Button>

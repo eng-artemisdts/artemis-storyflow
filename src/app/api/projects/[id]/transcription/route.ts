@@ -11,6 +11,7 @@ import {
   readLocalUploadBuffer,
   uploadAudioshakeAsset,
 } from "@/lib/providers/audioshake";
+import { transcribeWithAssemblyAI } from "@/lib/providers/assemblyai-transcription";
 import { transcribeWithOpenAI } from "@/lib/providers/openai-transcription";
 import type { ProjectTranscription } from "@/lib/transcription";
 
@@ -18,7 +19,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 /**
- * Inicia transcrição com o provedor configurado (AudioShake ou OpenAI).
+ * Inicia transcrição com o provedor configurado (AudioShake, OpenAI ou AssemblyAI).
  *
  * Importante: NÃO enviamos o roteiro para forced-alignment.
  * Quando o texto do roteiro é maior/diferente do áudio, o AudioShake comprime
@@ -94,6 +95,41 @@ export async function POST(
             usedScript: false,
             language,
             provider: "openai" as const,
+            status: "completed" as const,
+            transcription,
+          },
+        });
+      }
+
+      if (providers.transcriptionProvider === "assemblyai") {
+        const apiKey = resolveProviderApiKey("assemblyai", ai?.apiKeys);
+        const result = await transcribeWithAssemblyAI({
+          apiKey,
+          model: providers.transcriptionModel || "universal-3-5-pro",
+          buffer,
+        });
+
+        const transcription: ProjectTranscription = {
+          ...result,
+          createdAt: new Date().toISOString(),
+        };
+
+        await prisma.project.update({
+          where: { id: project.id },
+          data: {
+            transcriptionJson: JSON.stringify(transcription),
+            brollsJson: null,
+          },
+        });
+        revalidatePath(`/projects/${project.id}`, "layout");
+
+        return NextResponse.json({
+          ok: true,
+          data: {
+            taskId: transcription.taskId,
+            usedScript: false,
+            language,
+            provider: "assemblyai" as const,
             status: "completed" as const,
             transcription,
           },

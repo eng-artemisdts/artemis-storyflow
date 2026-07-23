@@ -65,8 +65,8 @@ export function ExportVideoPanel({ projectId }: { projectId: string }) {
       <div className="mb-3 space-y-0.5">
         <h2 className="text-sm font-medium">Exportar projeto</h2>
         <p className="text-xs text-muted-foreground">
-          Gera um rascunho nativo do CapCut com cenas, narração, transições e
-          música para continuar a edição no app.
+          Gera um rascunho nativo do CapCut com cenas, movimentos de imagem,
+          narração, transições e música para continuar a edição no app.
         </p>
       </div>
 

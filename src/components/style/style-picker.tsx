@@ -688,8 +688,11 @@ function CustomStyleDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <DialogHeader>
+      <DialogContent
+        className="flex max-h-[min(90dvh,900px)] w-full flex-col gap-4 overflow-hidden sm:max-w-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader className="shrink-0 pr-8">
           <DialogTitle>
             {mode === "create" ? "Novo estilo" : "Editar estilo"}
           </DialogTitle>
@@ -698,7 +701,7 @@ function CustomStyleDialog({
             do card.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
           <div className="space-y-1.5">
             <Label htmlFor="custom-style-title">Título</Label>
             <Input
@@ -711,12 +714,17 @@ function CustomStyleDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="custom-style-prompt">Prompt do estilo</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="custom-style-prompt">Prompt do estilo</Label>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {prompt.length}/4000
+              </span>
+            </div>
             <Textarea
               id="custom-style-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              className="min-h-32 font-mono text-xs"
+              className="max-h-[min(36vh,280px)] min-h-32 resize-y overflow-y-auto font-mono text-xs field-sizing-fixed"
               placeholder="Descreva iluminação, texturas, paleta, linguagem visual..."
               maxLength={4000}
               disabled={isPreviewing}
@@ -770,7 +778,7 @@ function CustomStyleDialog({
             </div>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t pt-4">
           <Button
             variant="ghost"
             onClick={() => handleOpenChange(false)}

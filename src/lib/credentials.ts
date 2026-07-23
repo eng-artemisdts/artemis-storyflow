@@ -44,6 +44,15 @@ const ENV_FALLBACKS: Record<string, string | undefined> = {
   get audioshake() {
     return process.env.AUDIOSHAKE_API_KEY;
   },
+  get assemblyai() {
+    return process.env.ASSEMBLYAI_API_KEY;
+  },
+  get "google-flow"() {
+    return process.env.USEAPI_API_KEY;
+  },
+  get "google-flow-email"() {
+    return process.env.GOOGLE_FLOW_EMAIL;
+  },
 };
 
 /**
@@ -65,6 +74,18 @@ export function resolveProviderApiKey(
   throw new Error(
     `Nenhuma chave de API para "${provider}". Configure em Configurações → Chaves de API (ou no .env).`
   );
+}
+
+/** Email da conta Google Flow conectada em useapi.net (opcional — omitir usa load balancing). */
+export function resolveGoogleFlowEmail(clientKeys?: AiApiKeys | null): string | null {
+  const fromArg = clientKeys?.["google-flow-email"]?.trim();
+  if (fromArg) return fromArg;
+
+  const fromStore = aiContextStore.getStore()?.apiKeys?.["google-flow-email"]?.trim();
+  if (fromStore) return fromStore;
+
+  const fallback = ENV_FALLBACKS["google-flow-email"];
+  return fallback?.trim() || null;
 }
 
 /** @deprecated Use resolveProviderApiKey — mantido para call sites antigos. */

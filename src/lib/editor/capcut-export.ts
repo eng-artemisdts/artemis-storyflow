@@ -21,12 +21,14 @@ import JSZip from "jszip";
 import { getDataDir } from "@/lib/app-paths";
 import { buildEditorStateFromAssets } from "@/lib/editor/build-editor-state";
 import { parseEditorSettings } from "@/lib/editor/editor-settings";
+import { computeImageMotion } from "@/lib/editor/image-motion";
 import { ensureBrollsTimesInSeconds } from "@/lib/brolls/ensure-times";
 import {
   localUploadAbsolutePath,
   localUploadExists,
 } from "@/lib/local-uploads";
 import { prisma } from "@/lib/prisma";
+import type { EditorImageMotion } from "@/lib/schemas/editor";
 import {
   parseProjectTranscription,
   slugifyForFilename,
@@ -105,6 +107,131 @@ async function resolveLocalMediaPath(publicUrl: string): Promise<string> {
     throw new Error(`Arquivo de mídia não encontrado: ${publicUrl}`);
   }
   return localUploadAbsolutePath(publicUrl);
+}
+
+/**
+ * Duração real do arquivo via ffprobe (mesma fonte que o capcut-cli usa).
+ * Retorna null se ffprobe falhar — o caller cai no fallback (transcrição).
+ */
+async function probeMediaDurationSec(filePath: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        filePath,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] }
+    );
+    let out = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString("utf8");
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const sec = Number.parseFloat(out.trim());
+      resolve(Number.isFinite(sec) && sec > 0 ? sec : null);
+    });
+  });
+}
+
+/** Segundos para o spec CapCut sem ultrapassar a duração fonte (µs). */
+function capcutAudioDurationSec(desiredSec: number, sourceSec: number | null): number {
+  const desired = Math.max(0.05, desiredSec);
+  if (sourceSec == null || !(sourceSec > 0)) {
+    return Number(desired.toFixed(3));
+  }
+  // Floor em µs evita Math.round(toFixed(3)*1e6) > durationUs do arquivo.
+  const maxUs = Math.floor(sourceSec * 1_000_000);
+  const desiredUs = Math.min(Math.round(desired * 1_000_000), maxUs);
+  return desiredUs / 1_000_000;
+}
+
+function clampVolume(value: number, fallback = 0.35): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Garante volumes e clip:null nos segmentos de áudio após o compile.
+ * CapCut corta áudios sobrepostos na mesma track — usamos tracks separadas
+ * e reafirmamos o volume aqui (sync-timelines / rewrites não devem apagar).
+ */
+async function ensureDraftAudioVolumes(
+  draftOut: string,
+  opts: { narrationVolume: number; musicVolume: number | null }
+): Promise<void> {
+  const targets = ["draft_info.json", "draft_content.json", "template-2.tmp"];
+  const dirs = [draftOut];
+  const timelinesRoot = path.join(draftOut, "Timelines");
+  if (existsSync(timelinesRoot)) {
+    for (const entry of readdirSync(timelinesRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(path.join(timelinesRoot, entry.name));
+    }
+  }
+
+  for (const dir of dirs) {
+    for (const name of targets) {
+      const abs = path.join(dir, name);
+      if (!existsSync(abs)) continue;
+      try {
+        const draft = JSON.parse(await readFile(abs, "utf8")) as {
+          tracks?: Array<{
+            type?: string;
+            name?: string;
+            segments?: Array<Record<string, unknown>>;
+          }>;
+          materials?: {
+            audios?: Array<{ id?: string; name?: string; path?: string }>;
+          };
+        };
+
+        const audios = draft.materials?.audios ?? [];
+        const materialById = new Map(
+          audios.filter((a) => a.id).map((a) => [a.id!, a] as const)
+        );
+
+        for (const track of draft.tracks ?? []) {
+          if (track.type !== "audio" || !Array.isArray(track.segments)) continue;
+          const trackName = (track.name ?? "").toLowerCase();
+
+          for (const seg of track.segments) {
+            // Docs CapCut: clip em segmento de áudio pode crashar o app.
+            seg.clip = null;
+
+            const mat = materialById.get(String(seg.material_id ?? ""));
+            const matHint = `${mat?.name ?? ""} ${mat?.path ?? ""}`.toLowerCase();
+            const isMusic =
+              trackName.includes("music") ||
+              matHint.includes("music") ||
+              matHint.includes("/music");
+
+            if (isMusic && opts.musicVolume != null) {
+              seg.volume = opts.musicVolume;
+            } else if (
+              trackName.includes("narration") ||
+              matHint.includes("narration")
+            ) {
+              seg.volume = opts.narrationVolume;
+            }
+          }
+        }
+
+        await writeFile(abs, JSON.stringify(draft), "utf8");
+      } catch (err) {
+        console.warn(`[capcut-export] ensure audio volumes skipped for ${abs}:`, err);
+      }
+    }
+  }
 }
 
 /**
@@ -773,6 +900,10 @@ type PreparedProject = {
   fps: number;
   aspectRatio: string;
   durationSec: number;
+  /** Duração real do MP3 de narração (ffprobe); null se indisponível. */
+  narrationSourceDurationSec: number | null;
+  /** Duração real da música de fundo, se houver. */
+  musicSourceDurationSec: number | null;
   imageClips: Array<{
     src: string;
     startSec: number;
@@ -784,7 +915,8 @@ type PreparedProject = {
   musicVolume: number;
   transition: string;
   transitionMs: number;
-  imageMotion: string;
+  imageMotion: EditorImageMotion;
+  imageMotionIntensity: number;
 };
 
 async function loadPreparedProject(projectId: string): Promise<PreparedProject> {
@@ -809,10 +941,25 @@ async function loadPreparedProject(projectId: string): Promise<PreparedProject> 
   const brolls = await ensureBrollsTimesInSeconds(project.id);
   const transcription = parseProjectTranscription(project.transcriptionJson);
   const settings = parseEditorSettings(project.editorJson);
+
+  const narrationAbs = await resolveLocalMediaPath(project.audioUrl);
+  const narrationSourceDurationSec = await probeMediaDurationSec(narrationAbs);
+
+  let musicSourceDurationSec: number | null = null;
+  if (settings.musicUrl) {
+    try {
+      const musicAbs = await resolveLocalMediaPath(settings.musicUrl);
+      musicSourceDurationSec = await probeMediaDurationSec(musicAbs);
+    } catch {
+      musicSourceDurationSec = null;
+    }
+  }
+
   const editorState = buildEditorStateFromAssets({
     brolls,
     audioUrl: project.audioUrl,
-    audioDurationSec: null,
+    // Narração manda: não estender timeline além do MP3 (capcut-cli rejeita).
+    audioDurationSec: narrationSourceDurationSec,
     transcriptionDurationSec: transcriptionDurationSec(transcription),
     aspectRatio: project.videoAspectRatio,
   });
@@ -841,14 +988,82 @@ async function loadPreparedProject(projectId: string): Promise<PreparedProject> 
     fps: editorState.fps,
     aspectRatio: editorState.aspectRatio,
     durationSec: editorState.durationSec,
+    narrationSourceDurationSec,
+    musicSourceDurationSec,
     imageClips,
     audioUrl: project.audioUrl,
     musicUrl: settings.musicUrl ?? null,
-    musicVolume: settings.musicVolume ?? 0.35,
+    musicVolume: clampVolume(settings.musicVolume ?? 0.35),
     transition: settings.transition ?? "crossfade",
     transitionMs: settings.transitionMs ?? 350,
     imageMotion: settings.imageMotion ?? "ken-burns",
+    imageMotionIntensity: settings.imageMotionIntensity ?? 1,
   };
+}
+
+/**
+ * Keyframes CapCut usam time_offset relativo ao início do segmento (não ao
+ * timeline). Converte o motion do editor (%, scale) para position/scale CapCut.
+ */
+function appendImageMotionKeyframes(
+  operations: Array<Record<string, unknown>>,
+  target: string,
+  durationSec: number,
+  motion: EditorImageMotion,
+  clipIndex: number,
+  intensity: number
+): void {
+  if (motion === "none") return;
+
+  const from = computeImageMotion(0, motion, clipIndex, intensity);
+  const to = computeImageMotion(1, motion, clipIndex, intensity);
+  const duration = Math.max(0.05, durationSec);
+
+  // CSS translate% → CapCut position normalizado (-1..1); Y positivo = baixo (igual CSS).
+  const channels: Array<{
+    property: "scale_x" | "scale_y" | "position_x" | "position_y";
+    from: number;
+    to: number;
+  }> = [
+    { property: "scale_x", from: from.scale, to: to.scale },
+    { property: "scale_y", from: from.scale, to: to.scale },
+    {
+      property: "position_x",
+      from: from.translateX / 100,
+      to: to.translateX / 100,
+    },
+    {
+      property: "position_y",
+      from: from.translateY / 100,
+      to: to.translateY / 100,
+    },
+  ];
+
+  for (const channel of channels) {
+    const isScale = channel.property === "scale_x" || channel.property === "scale_y";
+    const isIdentity = isScale
+      ? Math.abs(channel.from - 1) < 1e-4 && Math.abs(channel.to - 1) < 1e-4
+      : Math.abs(channel.from) < 1e-4 && Math.abs(channel.to) < 1e-4;
+    if (isIdentity) continue;
+
+    operations.push(
+      {
+        op: "keyframe",
+        target,
+        property: channel.property,
+        time: 0,
+        value: Number(channel.from.toFixed(6)),
+      },
+      {
+        op: "keyframe",
+        target,
+        property: channel.property,
+        time: duration,
+        value: Number(channel.to.toFixed(6)),
+        easing: "ease-in-out",
+      }
+    );
+  }
 }
 
 function mapTransitionSlug(transition: string): string | null {
@@ -901,26 +1116,45 @@ async function buildNativeDraftFolder(
   const narrationFile = `narration${extensionFromPath(narrationAbs, ".mp3")}`;
   await copyFile(narrationAbs, path.join(mediaDir, narrationFile));
 
-  const audioItems: Array<Record<string, unknown>> = [
-    {
-      ref: "narration",
-      path: `media/${narrationFile}`,
-      start: 0,
-      duration: Number(prepared.durationSec.toFixed(3)),
-      volume: 1,
-    },
+  const narrationItem = {
+    ref: "narration",
+    path: `media/${narrationFile}`,
+    start: 0,
+    duration: capcutAudioDurationSec(
+      prepared.durationSec,
+      prepared.narrationSourceDurationSec
+    ),
+    volume: 1,
+  };
+
+  // Tracks de áudio separadas: na mesma faixa o CapCut corta segmentos sobrepostos
+  // e a música de fundo some sob a narração.
+  const tracks: Array<Record<string, unknown>> = [
+    { type: "video", name: "scenes", items: videoItems },
+    { type: "audio", name: "narration", items: [narrationItem] },
   ];
 
+  let musicVolume: number | null = null;
   if (prepared.musicUrl) {
     const musicAbs = await resolveLocalMediaPath(prepared.musicUrl);
     const musicFile = `music${extensionFromPath(musicAbs, ".mp3")}`;
     await copyFile(musicAbs, path.join(mediaDir, musicFile));
-    audioItems.push({
-      ref: "music",
-      path: `media/${musicFile}`,
-      start: 0,
-      duration: Number(prepared.durationSec.toFixed(3)),
-      volume: prepared.musicVolume,
+    musicVolume = clampVolume(prepared.musicVolume);
+    tracks.push({
+      type: "audio",
+      name: "music",
+      items: [
+        {
+          ref: "music",
+          path: `media/${musicFile}`,
+          start: 0,
+          duration: capcutAudioDurationSec(
+            prepared.durationSec,
+            prepared.musicSourceDurationSec
+          ),
+          volume: musicVolume,
+        },
+      ],
     });
   }
 
@@ -938,34 +1172,17 @@ async function buildNativeDraftFolder(
     }
   }
 
-  // Ken Burns leve (scale_x / scale_y — propriedades suportadas pelo capcut-cli).
-  if (prepared.imageMotion === "ken-burns") {
-    for (let i = 0; i < videoItems.length; i++) {
-      const item = videoItems[i]!;
-      const start = Number(item.start);
-      const duration = Number(item.duration);
-      const zoomIn = i % 2 === 0;
-      const from = zoomIn ? 1 : 1.08;
-      const to = zoomIn ? 1.08 : 1;
-      for (const property of ["scale_x", "scale_y"] as const) {
-        operations.push(
-          {
-            op: "keyframe",
-            target: `scene_${i + 1}`,
-            property,
-            time: start,
-            value: from,
-          },
-          {
-            op: "keyframe",
-            target: `scene_${i + 1}`,
-            property,
-            time: start + duration,
-            value: to,
-          }
-        );
-      }
-    }
+  // Motion das imagens (Ken Burns, zoom, drift, random) — tempos relativos ao clipe.
+  for (let i = 0; i < videoItems.length; i++) {
+    const item = videoItems[i]!;
+    appendImageMotionKeyframes(
+      operations,
+      `scene_${i + 1}`,
+      Number(item.duration),
+      prepared.imageMotion,
+      i,
+      prepared.imageMotionIntensity
+    );
   }
 
   const specBase = {
@@ -974,10 +1191,7 @@ async function buildNativeDraftFolder(
     height: prepared.height,
     fps: prepared.fps,
     ratio: prepared.aspectRatio,
-    tracks: [
-      { type: "video", name: "scenes", items: videoItems },
-      { type: "audio", name: "audio", items: audioItems },
-    ],
+    tracks,
   };
 
   const draftsParent = path.join(stagingRoot, "drafts");
@@ -1023,6 +1237,10 @@ async function buildNativeDraftFolder(
 
   // CapCut 9 grava paths absolutos. Sem reescrever, o ZIP aponta para /tmp e não abre.
   await finalizeNativeDraft(draftOut, prepared);
+  await ensureDraftAudioVolumes(draftOut, {
+    narrationVolume: 1,
+    musicVolume,
+  });
 
   await writeFile(
     path.join(draftOut, "INSTRUCOES.md"),

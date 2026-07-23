@@ -2,7 +2,7 @@ import "server-only";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateObject, type LanguageModel } from "ai";
+import { generateObject, streamObject, type LanguageModel } from "ai";
 import type { LlmProviderId } from "@/lib/providers/types";
 import { brollTimesLookLikeMs } from "@/lib/brolls/normalize-times";
 import {
@@ -109,24 +109,28 @@ export function buildBrollsSystemPrompt(input: {
 (word-by-word transcription with start/end times in MILLISECONDS) and produce a JSON list of
 b-roll image prompts, one per visual moment of the video.
 
-── SEGMENTATION RULES (do not change) ──
+── SEGMENTATION RULES ──
 
-- Start a new b-roll whenever the central visual concept changes.
-- Minimum duration per b-roll: 3 seconds. Maximum: 7 seconds. Target average: ~5s.
-- Cover 100% of the video timeline with no gaps and no overlaps.
-- The timestamp_seconds of each b-roll MUST equal the exact start time (in seconds)
-of the FIRST spoken word of that segment, taken directly from the word list
-(convert milliseconds → seconds by dividing by 1000).
-Never estimate or round when a word start is available.
+- Decide how many scenes are needed from the narration context (topic shifts, new ideas,
+visual beats, emphasis). Do NOT aim for a fixed scene count or a fixed seconds-per-scene.
+- Start a new b-roll whenever the central visual concept changes enough to need a new image.
+- Scene duration is also contextual: short beats can be brief; denser or slower passages can
+run longer. Do not force every scene into the same length.
+- Place scenes across the FULL narration from start to end. The last scene must begin near
+the final spoken ideas — never leave a large uncovered tail for one leftover scene to absorb.
+- Use the word timestamps as guidance for when each scene starts (milliseconds → seconds by
+dividing by 1000). Prefer natural phrase/idea boundaries over rigid clock targets.
+- "timestamp_seconds" is the approximate start of that visual moment in seconds.
 
-── OUTPUT FORMAT (do not change) ──
+── OUTPUT FORMAT ──
 Return ONLY the structured object matching the schema:
 {"brolls":[
 {"id":1,"timestamp_seconds":0.0,"concept":"short label of the moment","image_prompt":"full English image description ending with the style suffix"},
-{"id":2,"timestamp_seconds":7.2,"concept":"...","image_prompt":"..."}
+{"id":2,"timestamp_seconds":12.4,"concept":"...","image_prompt":"..."}
 ]}
 
 - "id" is sequential starting at 1, no gaps.
+- Produce as many items as the narration needs (short videos may have few; long ones many).
 - "concept" is a 2-5 word label (any language) for internal reference.
 - "image_prompt" is a complete English description of the image, ALWAYS ending
 with the exact STYLE SUFFIX defined below.
@@ -165,7 +169,15 @@ export function buildBrollsGenerationPromptParts(input: {
     channelDescription: input.channelDescription,
     aspectRatio: input.aspectRatio,
   });
-  const user = `Here is the word-level timestamp JSON (milliseconds). Produce the b-rolls list.\n\n${JSON.stringify(words)}`;
+  const audioEndSec = lastWordEndSeconds(input.transcription);
+  const user = [
+    `Word-level timestamp JSON (milliseconds). Produce the b-rolls list.`,
+    `Narration length: ~${audioEndSec.toFixed(1)} seconds.`,
+    `Choose scene count and each scene's length from the narration context — not from a fixed seconds template.`,
+    `Distribute scenes from the beginning through the end of the narration so the final scene starts near the closing ideas.`,
+    "",
+    JSON.stringify(words),
+  ].join("\n");
   return { system, user, styleSuffix };
 }
 
@@ -237,6 +249,81 @@ export async function generateBrollsFromTranscription(input: {
     createdAt: new Date().toISOString(),
     generationPromptMd,
   };
+}
+
+type PartialBrollLlmItem = {
+  id?: number;
+  timestamp_seconds?: number;
+  concept?: string;
+  image_prompt?: string;
+};
+
+/** Converte itens parciais do stream em b-rolls exibíveis na UI. */
+export function enrichPartialBrollsForDisplay(
+  raw: Array<PartialBrollLlmItem | undefined> | undefined,
+  audioEndSec: number
+): ProjectBroll[] {
+  if (!raw?.length) return [];
+
+  const items = raw
+    .filter(Boolean)
+    .filter(
+      (item): item is PartialBrollLlmItem & { id: number; concept: string } =>
+        typeof item?.id === "number" &&
+        typeof item?.concept === "string" &&
+        item.concept.trim().length > 0
+    )
+    .map((item) => ({
+      id: item.id,
+      timestamp_seconds:
+        typeof item.timestamp_seconds === "number" ? item.timestamp_seconds : 0,
+      concept: item.concept.trim(),
+      image_prompt:
+        typeof item.image_prompt === "string" && item.image_prompt.trim().length > 0
+          ? item.image_prompt.trim()
+          : "Gerando prompt visual…",
+    }));
+
+  if (items.length === 0) return [];
+  return enrichBrolls(items, audioEndSec);
+}
+
+export function startBrollsGenerationStream(input: {
+  providerId: string;
+  apiKey: string;
+  model: string;
+  transcription: ProjectTranscription;
+  stylePreset: StylePreset | null;
+  aspectRatio: string;
+  channelNiche: string | null;
+  channelDescription: string | null;
+  abortSignal?: AbortSignal;
+}) {
+  const { system, user } = buildBrollsGenerationPromptParts({
+    transcription: input.transcription,
+    stylePreset: input.stylePreset,
+    channelNiche: input.channelNiche,
+    channelDescription: input.channelDescription,
+    aspectRatio: input.aspectRatio,
+  });
+
+  const languageModel = createLanguageModel(
+    input.providerId,
+    input.apiKey,
+    input.model
+  );
+  const audioEnd = lastWordEndSeconds(input.transcription);
+
+  const result = streamObject({
+    model: languageModel,
+    schema: BrollsLlmSchema,
+    system,
+    prompt: user,
+    maxOutputTokens: 16_384,
+    abortSignal: input.abortSignal,
+  });
+
+  return { result, system, user, audioEnd };
 }
 
 /**
@@ -329,6 +416,37 @@ Keep the video visually cohesive. Never include gore, real public figures, real 
   return updates;
 }
 
+/**
+ * Estima uma duração razoável para a última cena a partir do ritmo das
+ * anteriores — evita engolir o restante do vídeo quando o LLM para cedo.
+ */
+function estimateLastSceneDuration(
+  starts: number[],
+  audioEndSec: number
+): number {
+  const gaps: number[] = [];
+  for (let i = 0; i < starts.length - 1; i++) {
+    const gap = starts[i + 1]! - starts[i]!;
+    if (gap > 0.05) gaps.push(gap);
+  }
+
+  const remaining = Math.max(0.1, audioEndSec - starts[starts.length - 1]!);
+  if (gaps.length === 0) {
+    // Sem ritmo prévio: cobre até o fim se o resto for curto; senão ~6s.
+    return remaining <= 12 ? remaining : Math.min(remaining, 6);
+  }
+
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const median = sortedGaps[Math.floor(sortedGaps.length / 2)]!;
+  const p75 = sortedGaps[Math.floor(sortedGaps.length * 0.75)]!;
+  const typical = Math.max(2, Math.min(20, p75 || median));
+
+  // Se o restante cabe no ritmo natural das cenas, usa o fim do áudio.
+  if (remaining <= typical * 2.5) return remaining;
+  // Caso contrário, não estica a última cena pelo vídeo inteiro.
+  return Math.min(remaining, Math.max(median, typical));
+}
+
 export function enrichBrolls(
   raw: Array<{
     id: number;
@@ -349,13 +467,16 @@ export function enrichBrolls(
     }))
     .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
 
+  const starts = sorted.map((item) => Math.max(0, item.timestamp_seconds));
+  const lastDuration = estimateLastSceneDuration(starts, audioEndSec);
+
   return sorted.map((item, index) => {
-    const start = Math.max(0, item.timestamp_seconds);
-    const nextStart = sorted[index + 1]?.timestamp_seconds;
+    const start = starts[index]!;
+    const nextStart = starts[index + 1];
     const end =
       nextStart != null && nextStart > start
         ? nextStart
-        : Math.max(start + 3, audioEndSec);
+        : Math.min(audioEndSec, start + lastDuration);
     const duration = Math.max(0.1, end - start);
     return {
       id: index + 1,

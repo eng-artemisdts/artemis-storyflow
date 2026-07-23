@@ -1,18 +1,16 @@
 import { z } from "zod";
 
+/** Item individual retornado pelo LLM. */
+export const BrollLlmItemSchema = z.object({
+  id: z.number().int().positive(),
+  timestamp_seconds: z.number().nonnegative(),
+  concept: z.string().min(1).max(120),
+  image_prompt: z.string().min(10).max(4_000),
+});
+
 /** Saída bruta do LLM (formato do brolls-prompt). */
 export const BrollsLlmSchema = z.object({
-  brolls: z
-    .array(
-      z.object({
-        id: z.number().int().positive(),
-        timestamp_seconds: z.number().nonnegative(),
-        concept: z.string().min(1).max(120),
-        image_prompt: z.string().min(10).max(4_000),
-      })
-    )
-    .min(1)
-    .max(400),
+  brolls: z.array(BrollLlmItemSchema).min(1).max(400),
 });
 
 export type BrollsLlmResult = z.infer<typeof BrollsLlmSchema>;

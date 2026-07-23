@@ -13,7 +13,8 @@ export const runtime = "nodejs";
 
 /**
  * Consulta status da task. AudioShake: polling externo.
- * OpenAI: transcrição já persistida no POST — lê do banco se taskId começa com openai:.
+ * OpenAI / AssemblyAI: transcrição já persistida no POST — lê do banco se taskId
+ * começa com openai: ou assemblyai:.
  */
 export async function GET(
   request: Request,
@@ -43,8 +44,8 @@ export async function GET(
         );
       }
 
-      // OpenAI: resultado já salvo no POST
-      if (taskId.startsWith("openai:")) {
+      // OpenAI / AssemblyAI: resultado já salvo no POST
+      if (taskId.startsWith("openai:") || taskId.startsWith("assemblyai:")) {
         const transcription = parseProjectTranscription(project.transcriptionJson);
         if (transcription?.taskId === taskId) {
           return NextResponse.json({
@@ -52,8 +53,9 @@ export async function GET(
             data: { status: "completed" as const, transcription },
           });
         }
+        const label = taskId.startsWith("assemblyai:") ? "AssemblyAI" : "OpenAI";
         return NextResponse.json(
-          { ok: false, error: "Transcrição OpenAI não encontrada no projeto" },
+          { ok: false, error: `Transcrição ${label} não encontrada no projeto` },
           { status: 404 }
         );
       }

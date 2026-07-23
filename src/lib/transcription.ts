@@ -13,7 +13,7 @@ export type TranscriptionSegment = {
   words: TranscriptionWord[];
 };
 
-export type TranscriptionSource = "audioshake" | "openai";
+export type TranscriptionSource = "audioshake" | "openai" | "assemblyai";
 
 export type ProjectTranscription = {
   text: string;

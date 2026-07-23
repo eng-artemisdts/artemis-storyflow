@@ -31,7 +31,7 @@ export default async function StaticTranscriptionPage({
         <h1 className="text-2xl font-semibold tracking-tight">Transcrição</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Gere o texto alinhado ao áudio com timestamps para legendas e edição.
-          Escolha o provedor (AudioShake ou OpenAI Whisper) aqui ou em Configurações.
+          Escolha o provedor (AudioShake, OpenAI Whisper ou AssemblyAI) aqui ou em Configurações.
         </p>
       </div>
       <TranscriptionStep
