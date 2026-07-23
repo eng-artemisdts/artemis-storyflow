@@ -57,7 +57,7 @@ export default async function ProjectLayout({
     : "/";
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-dvh max-h-dvh flex-col overflow-hidden">
       <VideoKindRouteGuard projectId={project.id} videoKind={videoKind} />
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
         <Button variant="ghost" size="icon" className="size-8" asChild>

@@ -2,9 +2,6 @@ import { z } from "zod";
 
 export const EDITOR_FPS = 30;
 
-/** ID da composition Remotion (usado no bundle do player e no export). */
-export const STATIC_COMPOSITION_ID = "StaticVideo";
-
 export const EditorClipSchema = z.object({
   id: z.string().min(1),
   type: z.enum(["image", "audio"]),
@@ -146,67 +143,3 @@ export type EditorPersisted = z.infer<typeof EditorPersistedSchema>;
 export type EditorClip = z.infer<typeof EditorClipSchema>;
 export type EditorTrack = z.infer<typeof EditorTrackSchema>;
 export type EditorState = z.infer<typeof EditorStateSchema>;
-
-/** Props passadas ao Player / Composition Remotion. */
-export type StaticCompositionProps = {
-  imageClips: Array<{
-    id: string;
-    src: string;
-    fromFrame: number;
-    durationInFrames: number;
-  }>;
-  audioSrc: string | null;
-  musicSrc?: string | null;
-  musicVolume?: number;
-  durationInFrames: number;
-  width?: number;
-  height?: number;
-  backgroundColor: string;
-  /** Frames de overlap no crossfade (padrão ~0,4s). */
-  crossfadeFrames?: number;
-  transition?: EditorTransition;
-  /** Motion contínuo nas stills (Ken Burns etc.). */
-  imageMotion?: EditorImageMotion;
-  imageMotionIntensity?: number;
-  /** Cues de legenda derivados da transcrição. */
-  captionCues?: Array<{
-    text: string;
-    startSec: number;
-    endSec: number;
-    words: Array<{ text: string; startSec: number; endSec: number }>;
-  }>;
-  captionStyle?: EditorCaptionStyle;
-  captionScale?: number;
-  captionPosition?: EditorCaptionPosition;
-  captionFont?: EditorCaptionFont;
-  captionColor?: string;
-  captionHighlightColor?: string;
-  captionBgColor?: string;
-  captionBgOpacity?: number;
-  captionUppercase?: boolean;
-};
-
-export const DEFAULT_STATIC_COMPOSITION_PROPS: StaticCompositionProps = {
-  imageClips: [],
-  audioSrc: null,
-  musicSrc: null,
-  musicVolume: 0.35,
-  durationInFrames: 30,
-  width: 1920,
-  height: 1080,
-  backgroundColor: "#0a0a0a",
-  crossfadeFrames: Math.round(EDITOR_FPS * 0.35),
-  transition: "crossfade",
-  imageMotion: "ken-burns",
-  imageMotionIntensity: 1,
-  captionCues: [],
-  captionStyle: "boxed",
-  captionScale: 1,
-  captionPosition: "bottom",
-  captionFont: "arial-black",
-  captionColor: "#FFFFFF",
-  captionHighlightColor: "#FFE566",
-  captionBgColor: "#000000",
-  captionBgOpacity: 0.72,
-  captionUppercase: false,
-};

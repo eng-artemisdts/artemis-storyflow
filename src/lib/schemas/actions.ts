@@ -128,6 +128,12 @@ export const GenerateBrollsSchema = z.object({
   ai: AiClientContextSchema.optional(),
 });
 
+export const RefreshBrollPromptsSchema = z.object({
+  projectId: z.string().min(1),
+  brollIds: z.array(z.number().int().positive()).min(1).max(20),
+  ai: AiClientContextSchema.optional(),
+});
+
 export const UploadNarrationAudioSchema = z.object({
   projectId: z.string().min(1),
 });

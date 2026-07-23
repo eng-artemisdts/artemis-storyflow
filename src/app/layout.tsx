@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import { headers } from "next/headers";
 import { Geist_Mono, Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
@@ -17,11 +18,17 @@ export const metadata: Metadata = {
   description: "Storyboard com IA — do roteiro ao vídeo, cena a cena",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const ua = (await headers()).get("user-agent") ?? "";
+  const isElectron = ua.includes("Electron");
+  // React Grab intercepta ponteiro/scroll — não carregar dentro do Electron.
+  const enableReactGrab =
+    process.env.NODE_ENV === "development" && !isElectron;
+
   return (
     <html
       lang="pt-BR"
@@ -29,7 +36,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {process.env.NODE_ENV === "development" && (
+        {enableReactGrab && (
           <Script
             src="//unpkg.com/react-grab/dist/index.global.js"
             crossOrigin="anonymous"

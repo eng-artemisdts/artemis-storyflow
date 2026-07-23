@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { getUploadsDir } from "@/lib/app-paths";
 
 /**
  * Abstração de storage para os assets gerados (imagens/vídeos).
- * Em dev salva em public/uploads. Para produção, implemente
+ * Em dev/desktop salva em uploads locais. Para produção cloud, implemente
  * S3StorageService / R2StorageService com a mesma interface.
  */
 export interface StorageService {
@@ -14,7 +15,21 @@ export interface StorageService {
 }
 
 class LocalStorageService implements StorageService {
-  private uploadsDir = path.join(process.cwd(), "public", "uploads");
+  private dirReady: Promise<void> | null = null;
+
+  private get uploadsDir() {
+    return getUploadsDir();
+  }
+
+  private ensureDir(): Promise<void> {
+    if (!this.dirReady) {
+      this.dirReady = mkdir(this.uploadsDir, { recursive: true }).then(() => undefined);
+    }
+    return this.dirReady.catch((err) => {
+      this.dirReady = null;
+      throw err;
+    });
+  }
 
   async saveFromUrl(remoteUrl: string, keyHint: string): Promise<string> {
     const res = await fetch(remoteUrl);
@@ -27,8 +42,8 @@ class LocalStorageService implements StorageService {
   }
 
   async saveBuffer(data: Buffer, keyHint: string, ext: string): Promise<string> {
-    const fileName = `${keyHint}-${Date.now()}${ext}`;
-    await mkdir(this.uploadsDir, { recursive: true });
+    const fileName = `${keyHint}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    await this.ensureDir();
     try {
       await writeFile(path.join(this.uploadsDir, fileName), data);
     } catch (err) {

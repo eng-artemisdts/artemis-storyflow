@@ -35,7 +35,6 @@ import {
   type CaptionCue,
 } from "@/lib/editor/captions";
 import { transitionNeedsDuration } from "@/lib/editor/editor-settings";
-import type { ProjectExportState } from "@/lib/editor/export-state";
 import type {
   EditorCaptionPosition,
   EditorCaptionStyle,
@@ -99,7 +98,6 @@ export function StaticEditView({
   transcription = null,
   transcriptionDurationSec = null,
   initialSettings,
-  initialExportState,
 }: {
   projectId: string;
   audioUrl: string | null;
@@ -111,7 +109,6 @@ export function StaticEditView({
   transcription?: ProjectTranscription | null;
   transcriptionDurationSec?: number | null;
   initialSettings?: EditorSettings | null;
-  initialExportState?: ProjectExportState | null;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const musicRef = useRef<HTMLAudioElement | null>(null);
@@ -610,20 +607,7 @@ export function StaticEditView({
           onMusicFile={(file) => handleMusicUpload(file)}
           onClearMusic={handleClearMusic}
         >
-          <ExportVideoPanel
-            projectId={projectId}
-            initialState={
-              initialExportState ?? {
-                status: "idle",
-                progress: 0,
-                error: null,
-                videoUrl: null,
-                startedAt: null,
-                finishedAt: null,
-                pid: null,
-              }
-            }
-          />
+          <ExportVideoPanel projectId={projectId} />
         </EditSettingsPanel>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">

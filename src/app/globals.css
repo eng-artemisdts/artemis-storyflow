@@ -121,11 +121,16 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
-    @apply font-sans;
+    @apply font-sans h-full overflow-y-auto;
+  }
+  body {
+    @apply bg-background text-foreground min-h-full;
+  }
+  /* Radix ScrollArea: display:table no wrapper interno quebra wheel no Electron */
+  [data-slot="scroll-area-viewport"] > div {
+    display: block !important;
+    min-width: 0 !important;
   }
 }
 

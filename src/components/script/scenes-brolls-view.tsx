@@ -18,11 +18,14 @@ import {
   RefreshCw,
   Sparkles,
   ImageUp,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   generateProjectBrolls,
   getBrollsGenerationPromptMd,
+  refreshProjectBrollPromptsBatch,
+  resetProjectBrolls,
   updateBrollPrompt,
 } from "@/actions/brolls.actions";
 import { generateAssetImage } from "@/actions/asset.actions";
@@ -72,6 +75,9 @@ import { cn } from "@/lib/utils";
 /** Máximo de cenas por lote de geração. */
 const MAX_BATCH = 10;
 
+/** Cenas por chamada ao atualizar prompts (evita timeout em vídeos longos). */
+const PROMPT_REFRESH_BATCH = 15;
+
 /** Espera um único job terminar (polling leve). */
 async function waitForImageJob(jobId: string): Promise<PolledJob | null> {
   const header = encodeAiContextHeader();
@@ -117,7 +123,14 @@ export function ScenesBrollsView({
   const [brollsData, setBrollsData] = useState(initialBrolls);
   const [flowImportOpen, setFlowImportOpen] = useState(false);
   const [flowPromptCopied, setFlowPromptCopied] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [refreshPromptsConfirmOpen, setRefreshPromptsConfirmOpen] = useState(false);
   const [isAnalyzing, startAnalyze] = useTransition();
+  const [isRefreshingPrompts, startRefreshPrompts] = useTransition();
+  const [refreshPromptsProgress, setRefreshPromptsProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [isGeneratingBatch, startGenerateBatch] = useTransition();
   const [isExportingPrompt, startExportPrompt] = useTransition();
   const [busyTargets, setBusyTargets] = useState<Set<string>>(new Set());
@@ -213,28 +226,87 @@ export function ScenesBrollsView({
     setSelectedIds(new Set());
   }
 
+  async function runAnalyze() {
+    const result = await generateProjectBrolls({
+      projectId,
+      ai: getAiClientContext(),
+    });
+    if (result.ok) {
+      setBrollsData(
+        normalizeProjectBrollsTimes(
+          result.data.brolls,
+          transcriptionDurationSec(transcription)
+        )
+      );
+      setSelectedIds(new Set());
+      toast.success(`${result.data.brolls.brolls.length} b-rolls gerados`);
+      router.refresh();
+    } else {
+      toast.error(result.error);
+    }
+  }
+
   function handleAnalyze() {
     if (!hasTranscription) {
       toast.error("Gere a transcrição antes");
       return;
     }
+    startAnalyze(runAnalyze);
+  }
+
+  function handleResetAndRegenerate() {
+    setResetConfirmOpen(false);
     startAnalyze(async () => {
-      const result = await generateProjectBrolls({
-        projectId,
-        ai: getAiClientContext(),
-      });
-      if (result.ok) {
-        setBrollsData(
-          normalizeProjectBrollsTimes(
-            result.data.brolls,
-            transcriptionDurationSec(transcription)
-          )
-        );
-        setSelectedIds(new Set());
-        toast.success(`${result.data.brolls.brolls.length} b-rolls gerados`);
+      const reset = await resetProjectBrolls({ projectId });
+      if (!reset.ok) {
+        toast.error(reset.error);
+        return;
+      }
+      setBrollsData(null);
+      setSelectedIds(new Set());
+      await runAnalyze();
+    });
+  }
+
+  function handleRefreshPrompts() {
+    setRefreshPromptsConfirmOpen(false);
+    startRefreshPrompts(async () => {
+      const allIds = list.map((b) => b.id);
+      const chunks: number[][] = [];
+      for (let i = 0; i < allIds.length; i += PROMPT_REFRESH_BATCH) {
+        chunks.push(allIds.slice(i, i + PROMPT_REFRESH_BATCH));
+      }
+
+      let updatedCount = 0;
+      setRefreshPromptsProgress({ done: 0, total: chunks.length });
+
+      try {
+        for (let i = 0; i < chunks.length; i++) {
+          const result = await refreshProjectBrollPromptsBatch({
+            projectId,
+            brollIds: chunks[i]!,
+            ai: getAiClientContext(),
+          });
+          if (!result.ok) {
+            toast.error(result.error, {
+              description:
+                updatedCount > 0
+                  ? `${updatedCount} prompts já atualizados foram mantidos.`
+                  : undefined,
+            });
+            return;
+          }
+          updatedCount += chunks[i]!.length;
+          setBrollsData(result.data.brolls);
+          setRefreshPromptsProgress({ done: i + 1, total: chunks.length });
+        }
+
+        toast.success(`${updatedCount} prompts atualizados`, {
+          description: "As cenas, tempos e imagens existentes foram preservados.",
+        });
         router.refresh();
-      } else {
-        toast.error(result.error);
+      } finally {
+        setRefreshPromptsProgress(null);
       }
     });
   }
@@ -448,6 +520,57 @@ export function ScenesBrollsView({
           onImported={handleFlowImported}
         />
 
+        <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Remover todos os b-rolls?</DialogTitle>
+              <DialogDescription>
+                As {list.length} cenas atuais e suas imagens geradas serão removidas.
+                Em seguida, uma nova análise da transcrição será feita para gerar as
+                cenas do zero. Esta ação não pode ser desfeita.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setResetConfirmOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="destructive" onClick={handleResetAndRegenerate}>
+                <Trash2 className="size-4" />
+                Remover e gerar novamente
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={refreshPromptsConfirmOpen}
+          onOpenChange={setRefreshPromptsConfirmOpen}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Atualizar todos os prompts?</DialogTitle>
+              <DialogDescription>
+                Os prompts atuais, inclusive os editados manualmente, serão
+                reescritos conforme o estilo, proporção e configurações atuais do
+                projeto. As cenas, os tempos e as imagens existentes serão
+                preservados.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setRefreshPromptsConfirmOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleRefreshPrompts}>
+                <Sparkles className="size-4" />
+                Atualizar prompts
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <div className="sticky top-0 z-20 shrink-0 bg-background/95 pb-4 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-1">
@@ -486,7 +609,9 @@ export function ScenesBrollsView({
                     variant={list.length > 0 ? "outline" : "default"}
                     size={list.length > 0 ? "icon" : "default"}
                     onClick={handleAnalyze}
-                    disabled={isAnalyzing || isGeneratingBatch}
+                    disabled={
+                      isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                    }
                     aria-label={
                       isAnalyzing
                         ? "Gerando cenas"
@@ -518,8 +643,55 @@ export function ScenesBrollsView({
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={() => setRefreshPromptsConfirmOpen(true)}
+                    disabled={
+                      isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                    }
+                  >
+                    {isRefreshingPrompts ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
+                    {isRefreshingPrompts
+                      ? refreshPromptsProgress && refreshPromptsProgress.total > 1
+                        ? `Atualizando lote ${Math.min(
+                            refreshPromptsProgress.done + 1,
+                            refreshPromptsProgress.total
+                          )}/${refreshPromptsProgress.total}…`
+                        : "Atualizando prompts…"
+                      : "Atualizar prompts"}
+                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setResetConfirmOpen(true)}
+                        disabled={
+                          isAnalyzing || isRefreshingPrompts || isGeneratingBatch
+                        }
+                        aria-label="Remover todos os b-rolls e gerar novamente"
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Remover todos os b-rolls e gerar novamente
+                    </TooltipContent>
+                  </Tooltip>
+                  <Button
+                    type="button"
+                    variant="outline"
                     onClick={selectMissingUpToMax}
-                    disabled={isGeneratingBatch || isAnalyzing || missingImages === 0}
+                    disabled={
+                      isGeneratingBatch ||
+                      isAnalyzing ||
+                      isRefreshingPrompts ||
+                      missingImages === 0
+                    }
                   >
                     Selecionar sem imagem
                   </Button>
@@ -536,7 +708,10 @@ export function ScenesBrollsView({
                   <Button
                     onClick={handleGenerateSelected}
                     disabled={
-                      isGeneratingBatch || isAnalyzing || selectedCount === 0
+                      isGeneratingBatch ||
+                      isAnalyzing ||
+                      isRefreshingPrompts ||
+                      selectedCount === 0
                     }
                   >
                     {isGeneratingBatch ? (
@@ -656,8 +831,10 @@ export function ScenesBrollsView({
                     selected={selected}
                     selectionDisabled={
                       isGeneratingBatch ||
+                      isRefreshingPrompts ||
                       (!selected && selectedCount >= MAX_BATCH)
                     }
+                    interactionDisabled={isRefreshingPrompts}
                     isGenerating={runningTargets.has(targetId) || isCurrentBatch}
                     onToggleSelect={() => toggleSelect(broll.id)}
                     onRegenerate={() => handleRegenerate(broll.id)}
@@ -691,6 +868,7 @@ function BrollCard({
   narrationText,
   selected,
   selectionDisabled,
+  interactionDisabled,
   isGenerating,
   onToggleSelect,
   onRegenerate,
@@ -702,6 +880,7 @@ function BrollCard({
   narrationText: string;
   selected: boolean;
   selectionDisabled: boolean;
+  interactionDisabled: boolean;
   isGenerating: boolean;
   onToggleSelect: () => void;
   onRegenerate: () => void;
@@ -848,7 +1027,12 @@ function BrollCard({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={interactionDisabled}
+            onClick={() => setEditOpen(true)}
+          >
             <Pencil className="size-3.5" /> Prompt
           </Button>
           {broll.imageUrl && (
@@ -857,7 +1041,7 @@ function BrollCard({
               targetType="broll"
               targetId={targetId}
               title={title}
-              disabled={isGenerating}
+              disabled={isGenerating || interactionDisabled}
               onStarted={onEditStarted}
             />
           )}
@@ -867,7 +1051,7 @@ function BrollCard({
                 size="icon"
                 variant="outline"
                 className="size-8"
-                disabled={isGenerating}
+                disabled={isGenerating || interactionDisabled}
                 onClick={onRegenerate}
                 aria-label={broll.imageUrl ? "Regenerar imagem" : "Gerar imagem"}
               >

@@ -1,8 +1,8 @@
 import { access } from "node:fs/promises";
-import path from "node:path";
+import { publicUrlToAbsolutePath } from "@/lib/app-paths";
 
 export function localUploadAbsolutePath(publicUrl: string): string {
-  return path.join(process.cwd(), "public", publicUrl.replace(/^\//, ""));
+  return publicUrlToAbsolutePath(publicUrl);
 }
 
 export async function localUploadExists(publicUrl: string): Promise<boolean> {

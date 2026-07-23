@@ -82,6 +82,45 @@ pnpm lint            # eslint
 pnpm prisma studio   # inspecionar o banco
 ```
 
+## App desktop (Electron)
+
+O StoryFlow pode rodar como app nativo e gerar instaladores (`.dmg` / `.exe` / `.AppImage`).
+
+### Desenvolvimento
+
+Em um terminal, suba o Next:
+
+```bash
+pnpm dev
+```
+
+Em outro, abra a janela Electron apontando para o servidor local:
+
+```bash
+pnpm electron:dev
+```
+
+Dados (DB, uploads e exports temporários) ficam em `userData` do Electron quando `STORYFLOW_DESKTOP=1`.
+
+### Build de executáveis
+
+```bash
+# Gera standalone + empacota para o SO atual
+pnpm desktop:build
+
+# Só um alvo
+pnpm desktop:build:mac
+pnpm desktop:build:win
+pnpm desktop:build:linux
+```
+
+Artefatos em `dist-desktop/`.
+
+Notas:
+- O prepare embute um binário **Node** no bundle (o Next/Prisma/CapCut CLI não usam o runtime do Electron).
+- Chaves BYOK continuam nas Configurações; `ENCRYPTION_KEY` é gerada automaticamente em `userData` na primeira abertura.
+- Build cross-plataforma (ex.: `.exe` a partir de macOS) exige CI ou máquina do SO alvo.
+
 ## Produção (Postgres)
 
 1. Troque `provider = "sqlite"` por `"postgresql"` em `prisma/schema.prisma`.

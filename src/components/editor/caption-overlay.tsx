@@ -121,7 +121,7 @@ function KaraokeText({
 
 /**
  * Overlay de legenda syncado ao tempo do áudio.
- * Estilos 100% inline — o bundle Remotion não inclui classes Tailwind.
+ * Estilos inline para manter o preview independente do Tailwind.
  */
 export function CaptionOverlay({
   cue,
@@ -130,7 +130,7 @@ export function CaptionOverlay({
   captionScale = 1,
   captionPosition = "bottom",
   appearance = DEFAULT_CAPTION_APPEARANCE,
-  /** Preview ~22; Remotion 1080p ~52. */
+  /** Tamanho-base do texto no preview. */
   baseFontPx = 22,
 }: {
   cue: CaptionCue | null;

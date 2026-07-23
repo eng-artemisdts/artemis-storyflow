@@ -35,7 +35,7 @@ export const VIDEO_ASPECT_OPTIONS: Array<{
   },
 ];
 
-/** Dimensões de export / Remotion (1080p base). */
+/** Dimensões do projeto em resolução 1080p base. */
 export function videoAspectDimensions(aspectRatio: VideoAspectRatio): {
   width: number;
   height: number;

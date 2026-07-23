@@ -8,7 +8,9 @@ import { storage } from "@/lib/storage";
 export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_FILES = 400;
+/** Limite por requisição — o cliente envia em lotes; evita o upload único de 5+ min. */
+const MAX_FILES_PER_REQUEST = 12;
+const WRITE_CONCURRENCY = 4;
 
 function extForImage(file: File): string {
   const name = file.name.toLowerCase();
@@ -19,6 +21,27 @@ function extForImage(file: File): string {
   if (file.type.includes("jpeg") || file.type.includes("jpg")) return ".jpg";
   if (file.type.includes("gif")) return ".gif";
   return ".png";
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!, i);
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(1, items.length)) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 export async function POST(
@@ -60,20 +83,23 @@ export async function POST(
         { status: 400 }
       );
     }
-    if (files.length > MAX_FILES) {
+    if (files.length > MAX_FILES_PER_REQUEST) {
       return NextResponse.json(
-        { ok: false, error: `Máximo de ${MAX_FILES} arquivos por importação` },
+        {
+          ok: false,
+          error: `Máximo de ${MAX_FILES_PER_REQUEST} arquivos por requisição. Envie em lotes.`,
+        },
         { status: 413 }
       );
     }
 
     const knownIds = new Set(data.brolls.map((b) => b.id));
-    const imported: Array<{ id: number; imageUrl: string }> = [];
     const skipped: Array<{ name: string; reason: string }> = [];
-    const urlById = new Map<number, string>();
-
     const brollIdFields = formData.getAll("brollIds");
     const explicitIds = brollIdFields.map((v) => Number(v));
+
+    type Pending = { file: File; brollId: number };
+    const pending: Pending[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]!;
@@ -104,18 +130,27 @@ export async function POST(
         });
         continue;
       }
+      pending.push({ file, brollId });
+    }
 
+    const urlById = new Map<number, string>();
+    const writeResults = await mapPool(pending, WRITE_CONCURRENCY, async ({ file, brollId }) => {
       const buffer = Buffer.from(await file.arrayBuffer());
       const imageUrl = await storage.saveBuffer(
         buffer,
         `broll-${projectId}-${brollId}`,
         extForImage(file)
       );
-      urlById.set(brollId, imageUrl);
-      if (!imported.some((row) => row.id === brollId)) {
-        imported.push({ id: brollId, imageUrl });
-      }
+      return { id: brollId, imageUrl };
+    });
+
+    for (const row of writeResults) {
+      urlById.set(row.id, row.imageUrl);
     }
+
+    const imported = [...urlById.entries()]
+      .map(([id, imageUrl]) => ({ id, imageUrl }))
+      .sort((a, b) => a.id - b.id);
 
     if (imported.length === 0) {
       return NextResponse.json({
@@ -125,13 +160,19 @@ export async function POST(
       });
     }
 
-    const nextBrolls = data.brolls.map((b) =>
+    // Relê antes de gravar para não sobrescrever lotes anteriores.
+    const fresh = await prisma.project.findUnique({
+      where: { id: project.id },
+      select: { brollsJson: true },
+    });
+    const latest = parseProjectBrolls(fresh?.brollsJson) ?? data;
+    const nextBrolls = latest.brolls.map((b) =>
       urlById.has(b.id) ? { ...b, imageUrl: urlById.get(b.id)! } : b
     );
 
     await prisma.project.update({
       where: { id: project.id },
-      data: { brollsJson: JSON.stringify({ ...data, brolls: nextBrolls }) },
+      data: { brollsJson: JSON.stringify({ ...latest, brolls: nextBrolls }) },
     });
 
     revalidatePath(`/projects/${project.id}`, "layout");
@@ -140,7 +181,7 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       data: {
-        imported: imported.sort((a, b) => a.id - b.id),
+        imported,
         skipped,
       },
     });

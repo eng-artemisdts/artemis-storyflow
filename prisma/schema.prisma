@@ -84,10 +84,6 @@ model Project {
   brollsJson         String?
   /// Estado do mini-editor static (JSON): tracks, clips, duração.
   editorJson         String?
-  /// URL pública do MP4 exportado (slideshow static).
-  exportedVideoUrl   String?
-  /// Status/progresso do job de export (JSON): status, progress, error, etc.
-  exportJson         String?
   createdAt          DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

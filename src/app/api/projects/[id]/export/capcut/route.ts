@@ -1,28 +1,23 @@
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildCapcutDraftZip } from "@/lib/editor/build-capcut-draft-zip";
-import { resolveAppOrigin } from "@/lib/editor/export-paths";
+import {
+  buildCapcutExport,
+  cleanupExpiredCapcutExports,
+  resolveCapcutExportToken,
+} from "@/lib/editor/capcut-export";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
-function requestOrigin(request: Request): string {
-  const proto = request.headers.get("x-forwarded-proto");
-  const host =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (host) {
-    const scheme =
-      proto ??
-      (host.includes("localhost") || host.startsWith("127.") ? "http" : "https");
-    return `${scheme}://${host}`.replace(/\/$/, "");
-  }
-  return resolveAppOrigin();
-}
+type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ id: string }> }
-) {
+/**
+ * POST — gera o draft CapCut (nativo) e devolve token de download.
+ * GET  — transmite o ZIP pelo token (?token=...).
+ */
+export async function POST(_request: Request, context: Ctx) {
   const { id: projectId } = await context.params;
   try {
     const project = await prisma.project.findUnique({
@@ -37,22 +32,83 @@ export async function GET(
     }
     if (project.videoKind !== "static") {
       return NextResponse.json(
-        { ok: false, error: "Export CapCut disponível apenas para vídeos static" },
+        {
+          ok: false,
+          error: "Export CapCut disponível apenas para vídeos static",
+        },
         { status: 400 }
       );
     }
 
-    const { buffer, fileName } = await buildCapcutDraftZip(
-      projectId,
-      requestOrigin(request)
-    );
+    await cleanupExpiredCapcutExports();
+    const result = await buildCapcutExport(projectId);
 
-    return new NextResponse(new Uint8Array(buffer), {
+    return NextResponse.json({
+      ok: true,
+      data: {
+        token: result.token,
+        fileName: result.fileName,
+        draftName: result.draftName,
+        downloadUrl: `/api/projects/${projectId}/export/capcut?token=${result.token}`,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status =
+      /disco cheio|ENOSPC|no space/i.test(message) ? 507 : 500;
+    return NextResponse.json({ ok: false, error: message }, { status });
+  }
+}
+
+export async function GET(request: Request, context: Ctx) {
+  const { id: projectId } = await context.params;
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token")?.trim() ?? "";
+
+  if (!token) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Use POST para gerar o draft e depois GET com ?token= para baixar.",
+      },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const meta = await resolveCapcutExportToken(token);
+    if (!meta || meta.projectId !== projectId) {
+      return NextResponse.json(
+        { ok: false, error: "Download expirado ou inválido. Gere novamente." },
+        { status: 404 }
+      );
+    }
+    if (!existsSync(meta.zipPath)) {
+      return NextResponse.json(
+        { ok: false, error: "Arquivo ZIP não encontrado. Gere novamente." },
+        { status: 404 }
+      );
+    }
+
+    const size = statSync(meta.zipPath).size;
+    const stream = createReadStream(meta.zipPath, { highWaterMark: 1 << 20 });
+    const metaPath = meta.zipPath.replace(/\.zip$/, ".json");
+
+    // Limpa depois do download (TTL de 2h cobre falhas).
+    const cleanup = () => {
+      void rm(meta.zipPath, { force: true }).catch(() => {});
+      void rm(metaPath, { force: true }).catch(() => {});
+    };
+    stream.once("end", cleanup);
+    stream.once("error", cleanup);
+
+    return new NextResponse(stream as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${fileName}"`,
-        "Content-Length": String(buffer.byteLength),
+        "Content-Disposition": `attachment; filename="${meta.fileName}"`,
+        "Content-Length": String(size),
         "Cache-Control": "no-store",
       },
     });

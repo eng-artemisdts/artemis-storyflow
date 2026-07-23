@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { ensureBrollsTimesInSeconds } from "@/actions/brolls-normalize.actions";
 import { parseProjectTranscription, transcriptionDurationSec } from "@/lib/transcription";
 import { parseEditorSettings } from "@/lib/editor/editor-settings";
-import { parseExportState } from "@/lib/editor/export-state";
 import { resolveAccessibleUploadUrl } from "@/lib/local-uploads";
 import { resolveVideoAspectRatio } from "@/lib/video-aspect";
 import { StaticEditView } from "@/components/editor/static-edit-view";
@@ -26,8 +25,6 @@ export default async function StaticEditPage({
       transcriptionJson: true,
       videoKind: true,
       editorJson: true,
-      exportedVideoUrl: true,
-      exportJson: true,
     },
   });
   if (!project) notFound();
@@ -37,7 +34,6 @@ export default async function StaticEditPage({
   const imageCount = list.filter((b) => Boolean(b.imageUrl)).length;
   const transcription = parseProjectTranscription(project.transcriptionJson);
   const editorSettings = parseEditorSettings(project.editorJson);
-  const exportState = parseExportState(project.exportJson, project.exportedVideoUrl);
 
   const resolvedAudioUrl = await resolveAccessibleUploadUrl(project.audioUrl);
   const audioMissingOnDisk =
@@ -48,7 +44,7 @@ export default async function StaticEditPage({
       <div className="mb-4 shrink-0">
         <h1 className="text-2xl font-semibold tracking-tight">Edição</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Preview do slideshow, legendas, música e exportação do MP4 final.
+          Preview do slideshow, ajustes e exportação para o CapCut.
         </p>
       </div>
       <StaticEditView
@@ -62,7 +58,6 @@ export default async function StaticEditPage({
         transcriptionDurationSec={transcriptionDurationSec(transcription)}
         transcription={transcription}
         initialSettings={editorSettings}
-        initialExportState={exportState}
       />
     </div>
   );

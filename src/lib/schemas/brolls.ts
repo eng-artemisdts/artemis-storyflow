@@ -17,6 +17,19 @@ export const BrollsLlmSchema = z.object({
 
 export type BrollsLlmResult = z.infer<typeof BrollsLlmSchema>;
 
+/** Atualização dos prompts sem alterar a segmentação existente. */
+export const BrollPromptUpdatesSchema = z.object({
+  brolls: z
+    .array(
+      z.object({
+        id: z.number().int().positive(),
+        image_prompt: z.string().min(10).max(4_000),
+      })
+    )
+    .min(1)
+    .max(400),
+});
+
 /** B-roll enriquecido persistido no projeto (pronto para gerador de imagem). */
 export type ProjectBroll = {
   id: number;
@@ -37,6 +50,8 @@ export type ProjectBrolls = {
   styleId: string | null;
   styleLabel: string | null;
   createdAt: string;
+  /** Data da última atualização coletiva dos prompts. */
+  promptsUpdatedAt?: string | null;
   /** Prompt completo (system + user) usado na análise LLM, exportável em .md. */
   generationPromptMd?: string | null;
 };

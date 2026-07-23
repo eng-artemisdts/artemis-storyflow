@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { publicUrlToAbsolutePath } from "@/lib/app-paths";
 import type {
   ImageGenInput,
   ImageGenProvider,
@@ -148,7 +148,7 @@ async function loadImageAsBlob(url: string): Promise<Blob> {
     if (!res.ok) throw new Error(`Falha ao baixar referência (${res.status}): ${url}`);
     return res.blob();
   }
-  const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
+  const filePath = publicUrlToAbsolutePath(url);
   const buffer = await readFile(filePath);
   return new Blob([new Uint8Array(buffer)], { type: "image/png" });
 }

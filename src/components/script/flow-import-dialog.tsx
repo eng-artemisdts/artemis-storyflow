@@ -30,6 +30,35 @@ type StagedFile = {
   previewUrl: string;
 };
 
+/** Limites por requisição de upload (evita timeout com muitas imagens). */
+const UPLOAD_BATCH_MAX_FILES = 5;
+const UPLOAD_BATCH_MAX_BYTES = 12 * 1024 * 1024;
+
+/**
+ * Divide os arquivos em lotes pequenos por quantidade e tamanho acumulado.
+ * Um arquivo maior que o limite vai sozinho no lote (o servidor decide
+ * se aceita ou ignora).
+ */
+function chunkForUpload(items: StagedFile[]): StagedFile[][] {
+  const chunks: StagedFile[][] = [];
+  let current: StagedFile[] = [];
+  let currentBytes = 0;
+  for (const item of items) {
+    const wouldOverflow =
+      current.length >= UPLOAD_BATCH_MAX_FILES ||
+      (current.length > 0 && currentBytes + item.file.size > UPLOAD_BATCH_MAX_BYTES);
+    if (wouldOverflow) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(item);
+    currentBytes += item.file.size;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 function fileKey(file: File): string {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
@@ -66,6 +95,10 @@ export function FlowImportDialog({
   const [dropTargetId, setDropTargetId] = useState<number | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isExtractingZip, setIsExtractingZip] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const busy = isPending || isExtractingZip;
 
@@ -180,35 +213,72 @@ export function FlowImportDialog({
     }
 
     startTransition(async () => {
-      const formData = new FormData();
-      for (const item of toUpload) {
-        formData.append("files", item.file);
-        formData.append("brollIds", String(item.brollId));
+      const chunks = chunkForUpload(toUpload);
+      const allImported: Array<{ id: number; imageUrl: string }> = [];
+      const allSkipped: Array<{ name: string; reason: string }> = [];
+      setUploadProgress({ done: 0, total: chunks.length });
+
+      try {
+        for (let i = 0; i < chunks.length; i++) {
+          const formData = new FormData();
+          for (const item of chunks[i]!) {
+            formData.append("files", item.file);
+            formData.append("brollIds", String(item.brollId));
+          }
+
+          let json: {
+            ok: boolean;
+            error?: string;
+            data?: {
+              imported: Array<{ id: number; imageUrl: string }>;
+              skipped: Array<{ name: string; reason: string }>;
+            };
+          };
+          try {
+            const res = await fetch(
+              `/api/projects/${projectId}/brolls/import-flow`,
+              { method: "POST", body: formData }
+            );
+            json = (await res.json()) as typeof json;
+          } catch {
+            json = { ok: false, error: "Falha de rede durante o envio" };
+          }
+
+          if (!json.ok || !json.data) {
+            // Mantém o que já subiu; remove do staging apenas o que importou.
+            if (allImported.length > 0) onImported(allImported);
+            toast.error(json.error ?? "Falha ao importar imagens", {
+              description:
+                allImported.length > 0
+                  ? `${allImported.length} imagem(ns) já importada(s) foram mantidas. Tente novamente para enviar o restante.`
+                  : undefined,
+            });
+            const importedIds = new Set(allImported.map((row) => row.id));
+            setStaged((prev) =>
+              prev.filter((item) => {
+                if (item.brollId != null && importedIds.has(item.brollId)) {
+                  URL.revokeObjectURL(item.previewUrl);
+                  return false;
+                }
+                return true;
+              })
+            );
+            return;
+          }
+
+          allImported.push(...json.data.imported);
+          allSkipped.push(...json.data.skipped);
+          setUploadProgress({ done: i + 1, total: chunks.length });
+        }
+
+        onImported(allImported);
+        toast.success(
+          `${allImported.length} imagem(ns) importada(s)${allSkipped.length ? ` · ${allSkipped.length} ignorada(s)` : ""}`
+        );
+        handleOpenChange(false);
+      } finally {
+        setUploadProgress(null);
       }
-
-      const res = await fetch(`/api/projects/${projectId}/brolls/import-flow`, {
-        method: "POST",
-        body: formData,
-      });
-      const json = (await res.json()) as {
-        ok: boolean;
-        error?: string;
-        data?: {
-          imported: Array<{ id: number; imageUrl: string }>;
-          skipped: Array<{ name: string; reason: string }>;
-        };
-      };
-
-      if (!json.ok || !json.data) {
-        toast.error(json.error ?? "Falha ao importar imagens");
-        return;
-      }
-
-      onImported(json.data.imported);
-      toast.success(
-        `${json.data.imported.length} imagem(ns) importada(s)${json.data.skipped.length ? ` · ${json.data.skipped.length} ignorada(s)` : ""}`
-      );
-      handleOpenChange(false);
     });
   }
 
@@ -453,7 +523,9 @@ export function FlowImportDialog({
             ) : (
               <ImageUp className="size-4" />
             )}
-            Importar {assigned.length > 0 ? `(${assigned.length})` : ""}
+            {isPending && uploadProgress && uploadProgress.total > 1
+              ? `Enviando lote ${Math.min(uploadProgress.done + 1, uploadProgress.total)}/${uploadProgress.total}…`
+              : `Importar ${assigned.length > 0 ? `(${assigned.length})` : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>

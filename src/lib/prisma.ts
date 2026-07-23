@@ -1,12 +1,13 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@/generated/prisma/client";
+import { getPrismaDbUrl } from "@/lib/app-paths";
 
 /**
  * Incrementar quando o schema Prisma muda em desenvolvimento.
  * Evita reutilizar um PrismaClient antigo no `globalThis` após `prisma generate`
  * (hot-reload não reconstrói o singleton sozinho).
  */
-const PRISMA_CLIENT_VERSION = 16;
+const PRISMA_CLIENT_VERSION = 17;
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -15,7 +16,7 @@ const globalForPrisma = globalThis as unknown as {
 
 function createClient(): PrismaClient {
   const adapter = new PrismaBetterSqlite3({
-    url: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
+    url: getPrismaDbUrl(),
   });
   return new PrismaClient({ adapter });
 }

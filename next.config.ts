@@ -6,19 +6,11 @@ const nextConfig: NextConfig = {
   logging: {
     serverFunctions: false,
   },
-  transpilePackages: [
-    "remotion",
-    "@remotion/player",
-    "@remotion/media-utils",
-  ],
+  // Standalone facilita empacotar no Electron (node server.js).
+  output: process.env.STORYFLOW_DESKTOP === "1" ? "standalone" : undefined,
   serverExternalPackages: [
-    "@remotion/renderer",
-    "@remotion/bundler",
-    "@remotion/compositor-darwin-arm64",
-    "@remotion/compositor-darwin-x64",
-    "@remotion/compositor-linux-x64-gnu",
-    "@remotion/compositor-linux-x64-musl",
-    "@remotion/compositor-win32-x64-msvc",
+    "capcut-cli",
+    "better-sqlite3",
   ],
   experimental: {
     // No Next 16.2, bodySizeLimit das Server Actions fica em experimental.
@@ -26,6 +18,15 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "50mb",
     },
     proxyClientMaxBodySize: "50mb",
+  },
+  async rewrites() {
+    // Serve uploads via route (suporta STORYFLOW_DATA_DIR no desktop).
+    return [
+      {
+        source: "/uploads/:path*",
+        destination: "/api/file-uploads/:path*",
+      },
+    ];
   },
 };
 

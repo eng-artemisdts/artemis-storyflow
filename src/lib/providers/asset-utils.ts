@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { publicUrlToAbsolutePath } from "@/lib/app-paths";
 
 /**
  * Carrega um asset (ex.: keyframe da cena) como bytes + mime type.
@@ -22,7 +23,7 @@ export async function loadAssetBytes(
     };
   }
 
-  const filePath = path.join(process.cwd(), "public", url.replace(/^\//, ""));
+  const filePath = publicUrlToAbsolutePath(url);
   return { buffer: await readFile(filePath), mimeType: guessMimeType(url) };
 }
 
